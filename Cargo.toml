@@ -5,4 +5,3 @@ authors = ["Speedy Consoles <rubihome@gmx.de>"]
 
 [dependencies]
 glium = "*"
-

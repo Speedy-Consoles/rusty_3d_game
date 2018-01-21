@@ -1,5 +1,8 @@
+use std::f64::consts::PI;
+
 use super::glium;
-use super::glutin;
+
+use ::world::World;
 
 #[derive(Copy, Clone)]
 struct MyVertex {
@@ -18,7 +21,6 @@ pub struct Graphics {
 
 impl Graphics {
     pub fn new(display: glium::Display) -> Graphics {
-
         // program
         let vertex_shader_source = Self::load_shader_source("shader_src/vertex_shader.vert");
         let fragment_shader_source = Self::load_shader_source("shader_src/fragment_shader.frag");
@@ -29,8 +31,22 @@ impl Graphics {
             None
         ).unwrap();
 
+        use self::glium::uniform;
         // uniforms
-        let uniforms = glium::uniforms::EmptyUniforms;
+        let _uniforms = uniform! {
+            modelMatrix: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0 , 0.0, 0.0, 1.0f32],
+            ],
+            perspectiveMatrix: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0f32],
+            ],
+        };
 
         // vertex buffer
         let vertex_data = &[
@@ -65,24 +81,23 @@ impl Graphics {
             vertex_buffer,
             index_buffer,
             program,
-            uniforms,
+            uniforms: glium::uniforms::EmptyUniforms{}, // TODO fill uniforms
         }
     }
 
-    pub fn draw(&mut self) {
+    pub fn draw(&mut self, world: &World) { // the world probably shouldn't be a parameter
         use self::glium::Surface;
-
-        let mut draw_parameters = glium::DrawParameters::default();
 
         //println!("{:?}", self.graphics.display.gl_window().get_inner_size().unwrap());
         let mut frame = self.display.draw();
-        frame.clear_color(0.0, 0.0, 0.0, 1.0);
+        let red = (world.get_angle() / (2.0 * PI)) as f32;
+        frame.clear_color(red, 0.0, 0.0, 1.0);
         frame.draw(
             &self.vertex_buffer,
             &self.index_buffer,
             &self.program,
             &self.uniforms,
-            &draw_parameters
+            &Default::default(),
         ).unwrap();
         frame.finish().unwrap();
     }
