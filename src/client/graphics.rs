@@ -1,4 +1,6 @@
-use std::f64::consts::PI;
+extern crate cgmath;
+
+use std::f32::consts::PI;
 
 use super::glium;
 
@@ -16,7 +18,6 @@ pub struct Graphics {
     vertex_buffer: glium::VertexBuffer<MyVertex>,
     index_buffer: glium::IndexBuffer<u32>,
     program: glium::program::Program,
-    uniforms: glium::uniforms::EmptyUniforms,
 }
 
 impl Graphics {
@@ -31,44 +32,27 @@ impl Graphics {
             None
         ).unwrap();
 
-        use self::glium::uniform;
-        // uniforms
-        let _uniforms = uniform! {
-            modelMatrix: [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0 , 0.0, 0.0, 1.0f32],
-            ],
-            perspectiveMatrix: [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0f32],
-            ],
-        };
-
         // vertex buffer
         let vertex_data = &[
             MyVertex {
-                position: [-0.5, -0.5, -0.5]
+                position: [0.5, -0.5, -0.5]
             },
             MyVertex {
-                position: [ 0.5, -0.5, -0.5]
+                position: [0.5,  0.5, -0.5]
             },
             MyVertex {
-                position: [-0.5,  0.5, -0.5]
+                position: [0.5, -0.5,  0.5]
             },
             MyVertex {
-                position: [ 0.5,  0.5, -0.5]
+                position: [0.5,  0.5,  0.5]
             },
         ];
         let vertex_buffer = glium::VertexBuffer::new(&display, vertex_data).unwrap();
 
         // index buffer
         let index_data = &[
-            0u32, 1, 3,
-            0, 3, 2,
+            0u32, 3, 1,
+            0, 2, 3,
         ];
         let index_buffer = glium::IndexBuffer::new(
             &display,
@@ -81,22 +65,73 @@ impl Graphics {
             vertex_buffer,
             index_buffer,
             program,
-            uniforms: glium::uniforms::EmptyUniforms{}, // TODO fill uniforms
         }
     }
 
     pub fn draw(&mut self, world: &World) { // the world probably shouldn't be a parameter
         use self::glium::Surface;
+        use self::glium::uniform;
 
-        //println!("{:?}", self.graphics.display.gl_window().get_inner_size().unwrap());
+        use self::cgmath::Matrix4;
+        use self::cgmath::Vector3;
+        use self::cgmath::Rad;
+        use self::cgmath::PerspectiveFov;
+
+        // global cs to character cs
+        let character_position = Vector3 {
+            x:-10.0,
+            y: 0.0,
+            z: 0.0f32,
+        };
+        let character_yaw = 0.0;
+        let character_pitch = 0.0;
+        let inverse_character_matrix = Matrix4::from_translation(-character_position)
+                * Matrix4::from_angle_y(Rad(-character_pitch))
+                * Matrix4::from_angle_z(Rad(-character_yaw));
+
+        // object cs to global cs
+        let object_position = Vector3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0f32,
+        };
+        let object_matrix = Matrix4::from_angle_z(Rad(world.get_angle() as f32))
+                * Matrix4::from_translation(object_position);
+
+        // character cs to eye cs
+        let inverse_eye_matrix = Matrix4::from_angle_y(Rad(PI / 2.0))
+            * Matrix4::from_angle_x(Rad(-PI / 2.0));
+
+        // object cs to eye cs
+        let model_matrix = inverse_eye_matrix * inverse_character_matrix * object_matrix;
+
+        // perspective
+        let aspect_ratio = 16.0 / 9.0f32;
+        let x_fov = PI / 4.0;
+        let z_near = 0.1;
+        let z_far = 100.0;
+        let perspective = PerspectiveFov {
+            fovy: Rad(x_fov), // should be y
+            aspect: aspect_ratio,
+            near: z_near,
+            far: z_far,
+        };
+        let perspective_matrix: Matrix4<f32> = perspective.into();
+
+        // overall transformation
+        let transformation_matrix = perspective_matrix * model_matrix;
+        let transformation_matrix_uniform: [[f32; 4]; 4] = transformation_matrix.into();
+        let uniforms = uniform! {
+            trafo_matrix: transformation_matrix_uniform,
+        };
+
         let mut frame = self.display.draw();
-        let red = (world.get_angle() / (2.0 * PI)) as f32;
-        frame.clear_color(red, 0.0, 0.0, 1.0);
+        frame.clear_color(0.0, 0.0, 0.0, 1.0);
         frame.draw(
             &self.vertex_buffer,
             &self.index_buffer,
             &self.program,
-            &self.uniforms,
+            &uniforms,
             &Default::default(),
         ).unwrap();
         frame.finish().unwrap();

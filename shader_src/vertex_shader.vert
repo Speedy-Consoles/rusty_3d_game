@@ -2,9 +2,8 @@
 
 in vec3 position;
 
-uniform mat4 modelMatrix;
-uniform mat4 perspectiveMatrix;
+uniform mat4 trafo_matrix;
 
 void main() {
-    gl_Position = vec4(position, 1.0);
+    gl_Position = trafo_matrix * vec4(position, 1.0);
 }
