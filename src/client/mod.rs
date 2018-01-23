@@ -40,22 +40,23 @@ impl Client {
             self.handle_events();
 
             {
-                use self::controls::EventCommand::*;
-                use self::controls::StateCommand::*;
-                use std::f64::consts::PI;
+                use self::controls::EventInput::*;
+                use self::controls::StateInput::*;
+                use self::controls::InputEvent::*;
+                use self::controls::InputState::*;
                 // TODO this should be sent to the server instead
-                for ec in self.controls.event_commands_iter() {
-                    match ec {
-                        Flip => self.world.rotate(PI),
+                let pi = &mut self.world.player_input;
+                for ie in self.controls.events_iter() {
+                    match ie {
+                        Trigger(Flip) => pi.add_flip(),
+                        Change{input: RotateRight, state: s} =>
+                            pi.set_rotate_right(match s {On => true, Off => false}),
+                        Change{input: RotateLeft, state: s} =>
+                            pi.set_rotate_left(match s {On => true, Off => false}),
                     }
                 }
-                if self.controls.state_command_active(&RotateRight) {
-                    self.world.rotate(-0.1);
-                }
-                if self.controls.state_command_active(&RotateLeft) {
-                    self.world.rotate(0.1);
-                }
             }
+            self.world.tick();
             self.graphics.draw(&self.world);
         }
     }

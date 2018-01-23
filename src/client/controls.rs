@@ -1,33 +1,43 @@
 use std::collections::VecDeque;
-use std::collections::HashSet;
 
 use super::glium::glutin;
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum StateCommand {
+#[derive(Debug)]
+pub enum InputState {
+    On,
+    Off,
+}
+
+#[derive(Debug)]
+pub enum StateInput {
     RotateRight,
     RotateLeft,
 }
 
 #[derive(Debug)]
-pub enum EventCommand {
+pub enum EventInput {
     Flip,
 }
 
-pub struct EventCommandIterator<'a> {
+#[derive(Debug)]
+pub enum InputEvent {
+    Trigger(EventInput),
+    Change{input: StateInput, state: InputState},
+}
+
+pub struct InputEventIterator<'a> {
     controls: &'a mut Controls,
 }
 
-impl<'a> Iterator for EventCommandIterator<'a> {
-    type Item = EventCommand;
+impl<'a> Iterator for InputEventIterator<'a> {
+    type Item = InputEvent;
     fn next(&mut self) -> Option<Self::Item> {
-        self.controls.event_commands.pop_front()
+        self.controls.input_events.pop_front()
     }
 }
 
 pub struct Controls {
-    event_commands: VecDeque<EventCommand>,
-    state_commands: HashSet<StateCommand>, // TODO maybe use something like enum_set instead
+    input_events: VecDeque<InputEvent>,
     // TODO add mapping
 }
 
@@ -36,6 +46,10 @@ impl Controls {
         // TODO use variable mapping instead
         use self::glutin::DeviceEvent as DE; // WHY self???
         use self::glutin::ElementState::*;
+        use self::InputEvent::*;
+        use self::EventInput::*;
+        use self::StateInput::*;
+        use self::InputState::*;
         match event {
             DE::Added => println!("Device added"),
             DE::Removed => println!("Device removed"),
@@ -49,17 +63,17 @@ impl Controls {
             // Key only occurs on state change, no repetition
             DE::Key(ki) => match ki.scancode {
                 30 => if ki.state == Pressed {
-                    self.state_commands.insert(StateCommand::RotateLeft);
+                    self.input_events.push_back(Change{input: RotateLeft, state: On});
                 } else {
-                    self.state_commands.remove(&StateCommand::RotateLeft);
+                    self.input_events.push_back(Change{input: RotateLeft, state: Off});
                 },
                 32 => if ki.state == Pressed {
-                    self.state_commands.insert(StateCommand::RotateRight);
+                    self.input_events.push_back(Change{input: RotateRight, state: On});
                 } else {
-                    self.state_commands.remove(&StateCommand::RotateRight);
+                    self.input_events.push_back(Change{input: RotateRight, state: Off});
                 },
                 57 => if ki.state == Pressed {
-                    self.event_commands.push_back(EventCommand::Flip);
+                    self.input_events.push_back(Trigger(Flip));
                 },
                 _  => (),
             },
@@ -67,20 +81,15 @@ impl Controls {
         }
     }
 
-    pub fn event_commands_iter<'a>(&'a mut self) -> EventCommandIterator<'a> {
-        EventCommandIterator{controls: self}
-    }
-
-    pub fn state_command_active(&self, command: &StateCommand) -> bool {
-        self.state_commands.contains(command)
+    pub fn events_iter<'a>(&'a mut self) -> InputEventIterator<'a> {
+        InputEventIterator{controls: self}
     }
 }
 
 impl Default for Controls {
     fn default() -> Self {
         Controls {
-            event_commands: VecDeque::new(),
-            state_commands: HashSet::new(),
+            input_events: VecDeque::new(),
         }
     }
 }
