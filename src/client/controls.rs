@@ -10,13 +10,15 @@ pub enum InputState {
 
 #[derive(Debug)]
 pub enum StateInput {
-    RotateRight,
-    RotateLeft,
+    MoveRight,
+    MoveLeft,
+    MoveForward,
+    MoveBackward,
 }
 
 #[derive(Debug)]
 pub enum EventInput {
-    Flip,
+    Jump,
 }
 
 #[derive(Debug)]
@@ -44,12 +46,13 @@ pub struct Controls {
 impl Controls {
     pub fn process_device_event(&mut self, _id: glutin::DeviceId, event: glutin::DeviceEvent) {
         // TODO use variable mapping instead
-        use self::glutin::DeviceEvent as DE; // WHY self???
+        use self::glutin::DeviceEvent as DE;
         use self::glutin::ElementState::*;
         use self::InputEvent::*;
         use self::EventInput::*;
         use self::StateInput::*;
         use self::InputState::*;
+        //println!("{:?}", event);
         match event {
             DE::Added => println!("Device added"),
             DE::Removed => println!("Device removed"),
@@ -62,18 +65,28 @@ impl Controls {
             DE::Button {button: _b, state: _s} => (),
             // Key only occurs on state change, no repetition
             DE::Key(ki) => match ki.scancode {
-                30 => if ki.state == Pressed {
-                    self.input_events.push_back(Change{input: RotateLeft, state: On});
+                17 => if ki.state == Pressed {
+                    self.input_events.push_back(Change{input: MoveForward, state: On});
                 } else {
-                    self.input_events.push_back(Change{input: RotateLeft, state: Off});
+                    self.input_events.push_back(Change{input: MoveForward, state: Off});
+                },
+                31 => if ki.state == Pressed {
+                    self.input_events.push_back(Change{input: MoveBackward, state: On});
+                } else {
+                    self.input_events.push_back(Change{input: MoveBackward, state: Off});
+                },
+                30 => if ki.state == Pressed {
+                    self.input_events.push_back(Change{input: MoveLeft, state: On});
+                } else {
+                    self.input_events.push_back(Change{input: MoveLeft, state: Off});
                 },
                 32 => if ki.state == Pressed {
-                    self.input_events.push_back(Change{input: RotateRight, state: On});
+                    self.input_events.push_back(Change{input: MoveRight, state: On});
                 } else {
-                    self.input_events.push_back(Change{input: RotateRight, state: Off});
+                    self.input_events.push_back(Change{input: MoveRight, state: Off});
                 },
                 57 => if ki.state == Pressed {
-                    self.input_events.push_back(Trigger(Flip));
+                    self.input_events.push_back(Trigger(Jump));
                 },
                 _  => (),
             },

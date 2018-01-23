@@ -1,7 +1,7 @@
 #![feature(use_extern_macros)]
 
 mod client;
-mod world;
+mod model;
 
 fn main() {
     let mut client = client::Client::new();

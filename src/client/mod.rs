@@ -2,7 +2,7 @@ extern crate glium;
 
 use self::glium::glutin;
 
-use ::world::World;
+use model::Model;
 
 mod graphics;
 mod controls;
@@ -12,7 +12,7 @@ pub struct Client {
     graphics: graphics::Graphics,
     controls: controls::Controls,
     closing: bool,
-    world: World,
+    model: Model,
 }
 
 impl Client {
@@ -23,14 +23,15 @@ impl Client {
             .with_title("rusty_3d_game");
         let context = glutin::ContextBuilder::new();
         let display = glium::Display::new(window, context, &events_loop).unwrap();
-        display.gl_window().set_cursor(glutin::MouseCursor::Crosshair);
+        display.gl_window().set_cursor(glutin::MouseCursor::NoneCursor);
+        display.gl_window().set_cursor_state(glutin::CursorState::Grab).unwrap();
 
         Client {
             events_loop,
             graphics: graphics::Graphics::new(display),
             controls: Default::default(),
             closing: false,
-            world: World::new(),
+            model: Model::new(),
         }
     }
 
@@ -45,25 +46,29 @@ impl Client {
                 use self::controls::InputEvent::*;
                 use self::controls::InputState::*;
                 // TODO this should be sent to the server instead
-                let pi = &mut self.world.player_input;
+                let ci = self.model.get_character_input();
                 for ie in self.controls.events_iter() {
                     match ie {
-                        Trigger(Flip) => pi.add_flip(),
-                        Change{input: RotateRight, state: s} =>
-                            pi.set_rotate_right(match s {On => true, Off => false}),
-                        Change{input: RotateLeft, state: s} =>
-                            pi.set_rotate_left(match s {On => true, Off => false}),
+                        Trigger(Jump) => ci.jump(),
+                        Change{input: MoveRight, state: s} =>
+                            ci.right = match s {On => true, Off => false},
+                        Change{input: MoveLeft, state: s} =>
+                            ci.left = match s {On => true, Off => false},
+                        Change{input: MoveForward, state: s} =>
+                            ci.forward = match s {On => true, Off => false},
+                        Change{input: MoveBackward, state: s} =>
+                            ci.backward = match s {On => true, Off => false},
                     }
                 }
             }
-            self.world.tick();
-            self.graphics.draw(&self.world);
+            self.model.tick();
+            self.graphics.draw(&self.model.get_world());
         }
     }
 
     fn handle_events(&mut self) {
-        use self::glutin::Event; // WHY self???
-        use self::glutin::WindowEvent as WE; // WHY self???
+        use self::glutin::Event;
+        use self::glutin::WindowEvent as WE;
 
         let mut events = Vec::new();
         self.events_loop.poll_events(|ev| events.push(ev));

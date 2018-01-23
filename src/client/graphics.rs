@@ -4,7 +4,7 @@ use std::f32::consts::PI;
 
 use super::glium;
 
-use ::world::World;
+use model::world::World;
 
 #[derive(Copy, Clone)]
 struct MyVertex {
@@ -78,10 +78,11 @@ impl Graphics {
         use self::cgmath::PerspectiveFov;
 
         // global cs to character cs
+        let cp = world.get_character().get_pos();
         let character_position = Vector3 {
-            x:-10.0,
-            y: 0.0,
-            z: 0.0f32,
+            x: cp.0 as f32,//-10.0,
+            y: cp.1 as f32,// 0.0,
+            z: cp.2 as f32,// 0.0f32,
         };
         let character_yaw = 0.0;
         let character_pitch = 0.0;
@@ -95,7 +96,7 @@ impl Graphics {
             y: 0.0,
             z: 0.0f32,
         };
-        let object_matrix = Matrix4::from_angle_z(Rad(world.get_angle() as f32))
+        let object_matrix = Matrix4::from_angle_z(Rad(0f32))
                 * Matrix4::from_translation(object_position);
 
         // character cs to eye cs
