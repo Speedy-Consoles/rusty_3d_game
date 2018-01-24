@@ -18,17 +18,24 @@ pub struct Graphics {
     vertex_buffer: glium::VertexBuffer<MyVertex>,
     index_buffer: glium::IndexBuffer<u32>,
     program: glium::program::Program,
+    background_program: glium::program::Program,
 }
 
 impl Graphics {
     pub fn new(display: glium::Display) -> Graphics {
         // program
-        let vertex_shader_source = Self::load_shader_source("shader_src/vertex_shader.vert");
-        let fragment_shader_source = Self::load_shader_source("shader_src/fragment_shader.frag");
         let program = glium::Program::from_source(
             &display,
-            &vertex_shader_source,
-            &fragment_shader_source,
+            &Self::load_shader_source("shader_src/vertex_shader.vert"),
+            &Self::load_shader_source("shader_src/fragment_shader.frag"),
+            None
+        ).unwrap();
+
+        // background program
+        let background_program = glium::Program::from_source(
+            &display,
+            &Self::load_shader_source("shader_src/background.vert"),
+            &Self::load_shader_source("shader_src/background.frag"),
             None
         ).unwrap();
 
@@ -65,17 +72,22 @@ impl Graphics {
             vertex_buffer,
             index_buffer,
             program,
+            background_program,
         }
     }
 
     pub fn draw(&mut self, world: &World) { // the world probably shouldn't be a parameter
         use self::glium::Surface;
+        use self::glium::draw_parameters;
         use self::glium::uniform;
+        use self::glium::vertex::EmptyVertexAttributes;
+        use self::glium::index::NoIndices;
 
         use self::cgmath::Matrix4;
         use self::cgmath::Vector3;
         use self::cgmath::Rad;
         use self::cgmath::PerspectiveFov;
+        use self::cgmath::SquareMatrix;
 
         // global cs to character cs
         let cp = world.get_character().get_pos();
@@ -101,9 +113,6 @@ impl Graphics {
             * Matrix4::from_angle_y(Rad(world.get_character().get_pitch() as f32))
             * Matrix4::from_angle_z(Rad(-world.get_character().get_yaw() as f32));
 
-        // object cs to eye cs
-        let model_matrix = inverse_eye_matrix * inverse_character_matrix * object_matrix;
-
         // perspective
         let aspect_ratio = 16.0 / 9.0f32;
         let x_fov = PI / 4.0;
@@ -117,21 +126,47 @@ impl Graphics {
         };
         let perspective_matrix: Matrix4<f32> = perspective.into();
 
-        // overall transformation
-        let transformation_matrix = perspective_matrix * model_matrix;
-        let transformation_matrix_uniform: [[f32; 4]; 4] = transformation_matrix.into();
-        let uniforms = uniform! {
-            trafo_matrix: transformation_matrix_uniform,
+        // object cs to screen cs
+        let global_to_screen_matrix = perspective_matrix
+            * inverse_eye_matrix
+            * inverse_character_matrix;
+
+        // object cs to screen cs
+        let object_to_screen_matrix = global_to_screen_matrix * object_matrix;
+
+        // uniforms
+        let object_to_screen_matrix_uniform: [[f32; 4]; 4] = object_to_screen_matrix.into();
+        let uniforms = uniform! {trafo_matrix: object_to_screen_matrix_uniform};
+        let screen_to_global_matrix_uniform: [[f32; 4]; 4] = object_to_screen_matrix.invert().unwrap().into();
+        let background_uniforms = uniform! {trafo_matrix: screen_to_global_matrix_uniform};
+
+        // draw parameters
+        let draw_parameters = draw_parameters::DrawParameters {
+            depth: draw_parameters::Depth {
+                test: glium::DepthTest::IfLess,
+                write: true,
+                ..Default::default()
+            },
+            ..Default::default()
         };
 
+        // background transformation matrix
         let mut frame = self.display.draw();
         frame.clear_color(0.0, 0.0, 0.0, 1.0);
+        frame.clear_depth(1.0);
+        frame.draw(
+            EmptyVertexAttributes {len: 4},
+            &NoIndices(glium::index::PrimitiveType::TriangleStrip),
+            &self.background_program,
+            &background_uniforms,
+            &Default::default(),
+        ).unwrap();
         frame.draw(
             &self.vertex_buffer,
             &self.index_buffer,
             &self.program,
             &uniforms,
-            &Default::default(),
+            &draw_parameters,
         ).unwrap();
         frame.finish().unwrap();
     }
