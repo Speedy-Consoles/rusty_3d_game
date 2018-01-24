@@ -84,11 +84,7 @@ impl Graphics {
             y: cp.1 as f32,// 0.0,
             z: cp.2 as f32,// 0.0f32,
         };
-        let character_yaw = 0.0;
-        let character_pitch = 0.0;
-        let inverse_character_matrix = Matrix4::from_translation(-character_position)
-                * Matrix4::from_angle_y(Rad(-character_pitch))
-                * Matrix4::from_angle_z(Rad(-character_yaw));
+        let inverse_character_matrix = Matrix4::from_translation(-character_position);
 
         // object cs to global cs
         let object_position = Vector3 {
@@ -101,7 +97,9 @@ impl Graphics {
 
         // character cs to eye cs
         let inverse_eye_matrix = Matrix4::from_angle_y(Rad(PI / 2.0))
-            * Matrix4::from_angle_x(Rad(-PI / 2.0));
+            * Matrix4::from_angle_x(Rad(-PI / 2.0))
+            * Matrix4::from_angle_y(Rad(world.get_character().get_pitch() as f32))
+            * Matrix4::from_angle_z(Rad(-world.get_character().get_yaw() as f32));
 
         // object cs to eye cs
         let model_matrix = inverse_eye_matrix * inverse_character_matrix * object_matrix;

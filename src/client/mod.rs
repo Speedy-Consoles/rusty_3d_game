@@ -43,23 +43,34 @@ impl Client {
             {
                 use self::controls::EventInput::*;
                 use self::controls::StateInput::*;
+                use self::controls::AxisInput::*;
                 use self::controls::InputEvent::*;
                 use self::controls::InputState::*;
                 // TODO this should be sent to the server instead
-                let ci = self.model.get_character_input();
+                let mut yaw = self.model.get_world().get_character().get_yaw();
+                let mut pitch = self.model.get_world().get_character().get_pitch();
                 for ie in self.controls.events_iter() {
                     match ie {
-                        Trigger(Jump) => ci.jump(),
-                        Change{input: MoveRight, state: s} =>
-                            ci.right = match s {On => true, Off => false},
-                        Change{input: MoveLeft, state: s} =>
-                            ci.left = match s {On => true, Off => false},
-                        Change{input: MoveForward, state: s} =>
-                            ci.forward = match s {On => true, Off => false},
-                        Change{input: MoveBackward, state: s} =>
-                            ci.backward = match s {On => true, Off => false},
+                        Trigger(Jump) => self.model.get_character_input().jump(),
+                        Toggle {input: i, state: s} => {
+                            let active = match s { Active => true, Inactive => false};
+                            match i {
+                                MoveRight => self.model.get_character_input().right = active,
+                                MoveLeft => self.model.get_character_input().left = active,
+                                MoveForward => self.model.get_character_input().forward = active,
+                                MoveBackward => self.model.get_character_input().backward = active,
+                            }
+                        },
+                        Move {input: i, value: v} => {
+                            match i {
+                                Yaw => yaw += v / 1000.0,
+                                Pitch => pitch += v / 1000.0,
+                            }
+                        },
                     }
                 }
+                self.model.get_character_input().set_yaw(yaw);
+                self.model.get_character_input().set_pitch(pitch);
             }
             self.model.tick();
             self.graphics.draw(&self.model.get_world());
