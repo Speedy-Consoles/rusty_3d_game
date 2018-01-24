@@ -94,6 +94,10 @@ impl Client {
                     WE::HoveredFileCancelled => println!("File hovercanceled"),
                     WE::ReceivedCharacter(_c) => (), // TODO handle chat
                     WE::Focused(_f) => (), // TODO disable controls
+                    WE::KeyboardInput {input: i, ..} =>
+                        if i.virtual_keycode == Some(glutin::VirtualKeyCode::Q) {
+                            self.closing = true
+                        }
                     // CursorMoved positions have sub-pixel precision,
                     // but cursor is likely displayed at the rounded-down integer position
                     WE::CursorMoved {position: _p, ..} => (), // TODO handle menu cursor
