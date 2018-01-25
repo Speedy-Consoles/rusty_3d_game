@@ -2,6 +2,9 @@
 
 uniform mat4 trafo_matrix;
 
+const vec4 color1 = vec4(0.1, 0.2, 0.5, 1.0);
+const vec4 color2 = vec4(0.5, 0.1, 0.2, 1.0);
+
 in vec2 position;
 out vec4 color;
 
@@ -14,10 +17,13 @@ void main() {
     color = vec4(0.0, 1.0, 1.0, 1.0);
     float c = (-t[0][2] * p.x - t[1][2] * p.y - t[3][2]) / t[2][2];
     float divisor = t[0][3] * p.x + t[1][3] * p.y + t[2][3] * c + t[3][3];
-    if (divisor == 0.0)
+    if (divisor <= 0.0)
         return;
     float d = 1.0 / divisor;
-    vec4 world_coords = trafo_matrix * vec4(p, c, d);
-    color = vec4(world_coords.xy / 1000.0, 0.0, 1.0);
-    //color = vec4(0.0, 1.0, 0.0, 1.0);
+    vec4 world_coords = trafo_matrix * vec4(p * d, c * d, d);
+    vec2 tile_value = mod(world_coords.xy, 1.0);
+    if (tile_value.x > 0.5 && tile_value.y > 0.5)
+        color = color1;
+    else
+        color = color2;
 }

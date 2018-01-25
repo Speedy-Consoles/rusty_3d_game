@@ -42,16 +42,16 @@ impl Graphics {
         // vertex buffer
         let vertex_data = &[
             MyVertex {
-                position: [0.5, -0.5, -0.5]
+                position: [0.5, -0.5, 0.2]
             },
             MyVertex {
-                position: [0.5,  0.5, -0.5]
+                position: [0.5,  0.5, 0.2]
             },
             MyVertex {
-                position: [0.5, -0.5,  0.5]
+                position: [0.5, -0.5, 1.2]
             },
             MyVertex {
-                position: [0.5,  0.5,  0.5]
+                position: [0.5,  0.5, 1.2]
             },
         ];
         let vertex_buffer = glium::VertexBuffer::new(&display, vertex_data).unwrap();
