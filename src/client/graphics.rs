@@ -85,6 +85,7 @@ impl Graphics {
 
         use self::cgmath::Matrix4;
         use self::cgmath::Vector3;
+        use self::cgmath::Vector4;
         use self::cgmath::Rad;
         use self::cgmath::PerspectiveFov;
         use self::cgmath::SquareMatrix;
@@ -92,10 +93,11 @@ impl Graphics {
         // global cs to character cs
         let cp = world.get_character().get_pos();
         let character_position = Vector3 {
-            x: cp.0 as f32,//-10.0,
-            y: cp.1 as f32,// 0.0,
-            z: cp.2 as f32,// 0.0f32,
+            x: cp.0 as f32,
+            y: cp.1 as f32,
+            z: cp.2 as f32,
         };
+        let character_height = 0.7f32;
         let inverse_character_matrix = Matrix4::from_translation(-character_position);
 
         // object cs to global cs
@@ -111,7 +113,8 @@ impl Graphics {
         let inverse_eye_matrix = Matrix4::from_angle_y(Rad(PI / 2.0))
             * Matrix4::from_angle_x(Rad(-PI / 2.0))
             * Matrix4::from_angle_y(Rad(world.get_character().get_pitch() as f32))
-            * Matrix4::from_angle_z(Rad(-world.get_character().get_yaw() as f32));
+            * Matrix4::from_angle_z(Rad(-world.get_character().get_yaw() as f32))
+            * Matrix4::from_translation(Vector3::new(0.0, 0.0, -character_height));
 
         // perspective
         let aspect_ratio = 16.0 / 9.0f32;
@@ -137,9 +140,11 @@ impl Graphics {
         // uniforms
         let object_to_screen_matrix_uniform: [[f32; 4]; 4] = object_to_screen_matrix.into();
         let uniforms = uniform! {trafo_matrix: object_to_screen_matrix_uniform};
-        let screen_to_global_matrix_uniform: [[f32; 4]; 4] = object_to_screen_matrix.invert().unwrap().into();
+        let screen_to_global_matrix_uniform: [[f32; 4]; 4] = global_to_screen_matrix.invert().unwrap().into();
         let background_uniforms = uniform! {trafo_matrix: screen_to_global_matrix_uniform};
 
+        println!("{:?}", character_position);
+        println!("{:?}", global_to_screen_matrix.invert().unwrap() * Vector4::new(0.0, 0.0, 0.0, 1.0));
         // draw parameters
         let draw_parameters = draw_parameters::DrawParameters {
             depth: draw_parameters::Depth {
