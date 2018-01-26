@@ -1,8 +1,7 @@
 extern crate cgmath;
 
-use std::f32::consts::PI;
-
 use super::glium;
+use self::cgmath::Matrix4;
 
 use model::world::World;
 
@@ -19,10 +18,13 @@ pub struct Graphics {
     index_buffer: glium::IndexBuffer<u32>,
     program: glium::program::Program,
     background_program: glium::program::Program,
+    perspective_matrix: Matrix4<f32>,
 }
 
 impl Graphics {
     pub fn new(display: glium::Display) -> Graphics {
+        use self::cgmath::SquareMatrix;
+
         // program
         let program = glium::Program::from_source(
             &display,
@@ -73,6 +75,7 @@ impl Graphics {
             index_buffer,
             program,
             background_program,
+            perspective_matrix: Matrix4::identity(),
         }
     }
 
@@ -83,22 +86,22 @@ impl Graphics {
         use self::glium::vertex::EmptyVertexAttributes;
         use self::glium::index::NoIndices;
 
+        use self::cgmath::Rad;
         use self::cgmath::Matrix4;
         use self::cgmath::Vector3;
-        use self::cgmath::Vector4;
-        use self::cgmath::Rad;
-        use self::cgmath::PerspectiveFov;
         use self::cgmath::SquareMatrix;
 
-        // global cs to character cs
+        // world cs to character cs
         let cp = world.get_character().get_pos();
         let character_position = Vector3 {
             x: cp.0 as f32,
             y: cp.1 as f32,
             z: cp.2 as f32,
         };
-        let character_height = 0.7f32;
-        let inverse_character_matrix = Matrix4::from_translation(-character_position);
+        let inverse_character_matrix =
+            Matrix4::from_angle_y(Rad(world.get_character().get_pitch() as f32))
+            * Matrix4::from_angle_z(Rad(-world.get_character().get_yaw() as f32))
+            * Matrix4::from_translation(-character_position);
 
         // object cs to global cs
         let object_position = Vector3 {
@@ -109,42 +112,18 @@ impl Graphics {
         let object_matrix = Matrix4::from_angle_z(Rad(0f32))
                 * Matrix4::from_translation(object_position);
 
-        // character cs to eye cs
-        let inverse_eye_matrix = Matrix4::from_angle_y(Rad(PI / 2.0))
-            * Matrix4::from_angle_x(Rad(-PI / 2.0))
-            * Matrix4::from_angle_y(Rad(world.get_character().get_pitch() as f32))
-            * Matrix4::from_angle_z(Rad(-world.get_character().get_yaw() as f32))
-            * Matrix4::from_translation(Vector3::new(0.0, 0.0, -character_height));
-
-        // perspective
-        let aspect_ratio = 16.0 / 9.0f32;
-        let x_fov = PI / 4.0;
-        let z_near = 0.1;
-        let z_far = 100.0;
-        let perspective = PerspectiveFov {
-            fovy: Rad(x_fov), // should be y
-            aspect: aspect_ratio,
-            near: z_near,
-            far: z_far,
-        };
-        let perspective_matrix: Matrix4<f32> = perspective.into();
+        // world cs to screen cs
+        let world_to_screen_matrix = self.perspective_matrix * inverse_character_matrix;
 
         // object cs to screen cs
-        let global_to_screen_matrix = perspective_matrix
-            * inverse_eye_matrix
-            * inverse_character_matrix;
-
-        // object cs to screen cs
-        let object_to_screen_matrix = global_to_screen_matrix * object_matrix;
+        let object_to_screen_matrix = world_to_screen_matrix * object_matrix;
 
         // uniforms
         let object_to_screen_matrix_uniform: [[f32; 4]; 4] = object_to_screen_matrix.into();
         let uniforms = uniform! {trafo_matrix: object_to_screen_matrix_uniform};
-        let screen_to_global_matrix_uniform: [[f32; 4]; 4] = global_to_screen_matrix.invert().unwrap().into();
-        let background_uniforms = uniform! {trafo_matrix: screen_to_global_matrix_uniform};
+        let screen_to_world_matrix_uniform: [[f32; 4]; 4] = world_to_screen_matrix.invert().unwrap().into();
+        let background_uniforms = uniform! {trafo_matrix: screen_to_world_matrix_uniform};
 
-        println!("{:?}", character_position);
-        println!("{:?}", global_to_screen_matrix.invert().unwrap() * Vector4::new(0.0, 0.0, 0.0, 1.0));
         // draw parameters
         let draw_parameters = draw_parameters::DrawParameters {
             depth: draw_parameters::Depth {
@@ -187,5 +166,35 @@ impl Graphics {
         vertex_buffer_reader.read_to_string(&mut vertex_shader_source)
             .expect("Error while reading vertex shader source!");
         vertex_shader_source
+    }
+
+    pub fn set_view_port(&mut self, width: u64, height: u64) {
+        use std::f64::consts::PI;
+        const Y_FOV: f64 = PI / 3.0;
+        self.build_perspective_matrix(width as f64 / height as f64, Y_FOV);
+    }
+
+    fn build_perspective_matrix(&mut self, screen_ratio: f64, mut y_fov: f64) {
+        use std::f32::consts::PI;
+        use self::cgmath::PerspectiveFov;
+        use self::cgmath::Rad;
+
+        // perspective
+        const OPTIMAL_SCREEN_RATIO: f64 = 16.0 / 9.0;
+        const Z_NEAR: f64 = 0.1;
+        const Z_FAR: f64 = 100.0;
+        if screen_ratio >= OPTIMAL_SCREEN_RATIO {
+            y_fov = ((y_fov / 2.0).tan() * OPTIMAL_SCREEN_RATIO / screen_ratio).atan() * 2.0;
+        }
+        let projection = PerspectiveFov {
+            fovy: Rad(y_fov as f32), // should be y
+            aspect: screen_ratio as f32,
+            near: Z_NEAR as f32,
+            far: Z_FAR as f32,
+        };
+        let projection_matrix: Matrix4<f32> = projection.into();
+        self.perspective_matrix = projection_matrix
+            * Matrix4::from_angle_y(Rad(PI / 2.0))
+            * Matrix4::from_angle_x(Rad(-PI / 2.0));
     }
 }

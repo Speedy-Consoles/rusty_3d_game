@@ -87,7 +87,8 @@ impl Client {
             match ev {
                 // Window events are only received if the window has focus
                 Event::WindowEvent {event: wev, ..} => match wev {
-                    WE::Resized(_width, _height) => (), // TODO change perspective matrix
+                    WE::Resized(width, height) =>
+                        self.graphics.set_view_port(width as u64, height as u64),
                     WE::Closed => self.closing = true,
                     WE::DroppedFile(buf) => println!("File dropped: {:?}", buf),
                     WE::HoveredFile(buf) => println!("File hovered: {:?}", buf),

@@ -50,7 +50,7 @@ impl Character {
             input: Default::default(),
             x: 0.0,
             y: 0.0,
-            z: 0.0,
+            z: 0.7,
             yaw: 0.0,
             pitch: 0.0,
         }
