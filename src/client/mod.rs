@@ -7,6 +7,8 @@ use model::Model;
 mod graphics;
 mod controls;
 
+const TICK_SPEED: u32 = 60;
+
 pub struct Client {
     events_loop: glutin::EventsLoop,
     graphics: graphics::Graphics,
@@ -21,7 +23,8 @@ impl Client {
         let window = glutin::WindowBuilder::new()
             .with_fullscreen(events_loop.get_available_monitors().next())
             .with_title("rusty_3d_game");
-        let context = glutin::ContextBuilder::new();
+        let context = glutin::ContextBuilder::new()
+            .with_vsync(false);
         let display = glium::Display::new(window, context, &events_loop).unwrap();
         display.gl_window().set_cursor(glutin::MouseCursor::NoneCursor);
         display.gl_window().set_cursor_state(glutin::CursorState::Grab).unwrap();
@@ -36,16 +39,22 @@ impl Client {
     }
 
     pub fn run(&mut self) {
-        // main loop
-        while !self.closing {
-            self.handle_events();
+        use std::time::Duration;
+        use std::time::Instant;
+        use std::thread;
 
+        // main loop
+        let mut next_tick_time = Instant::now();
+        while !self.closing {
+            next_tick_time += Duration::from_secs(1) / TICK_SPEED;
+            self.handle_events();
             {
                 use self::controls::EventInput::*;
                 use self::controls::StateInput::*;
                 use self::controls::AxisInput::*;
                 use self::controls::InputEvent::*;
                 use self::controls::InputState::*;
+
                 // TODO this should be sent to the server instead
                 let mut yaw = self.model.get_world().get_character().get_yaw();
                 let mut pitch = self.model.get_world().get_character().get_pitch();
@@ -72,8 +81,18 @@ impl Client {
                 self.model.get_character_input().set_yaw(yaw);
                 self.model.get_character_input().set_pitch(pitch);
             }
+
             self.model.tick();
-            self.graphics.draw(&self.model.get_world());
+
+            if next_tick_time > Instant::now() {
+                self.graphics.draw(&self.model.get_world());
+            }
+
+            let now = Instant::now();
+            if next_tick_time > now {
+                let sleep_duration = next_tick_time - now;
+                thread::sleep(sleep_duration);
+            }
         }
     }
 
