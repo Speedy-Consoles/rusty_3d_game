@@ -1,21 +1,17 @@
 use std::f64::consts::PI;
 
 #[derive(Default, Copy, Clone)]
-pub struct Input {
-    jumping: bool,
+pub struct CharacterInput {
     pub forward: bool,
     pub backward: bool,
     pub right: bool,
     pub left: bool,
+    pub jumping: bool,
     yaw: f64,
     pitch: f64,
 }
 
-impl Input {
-    pub fn jump(&mut self) {
-        self.jumping = true;
-    }
-
+impl CharacterInput {
     pub fn set_yaw (&mut self, yaw: f64) {
         self.yaw = (yaw % (PI * 2.0) + (PI * 2.0)) % (PI * 2.0);
     }
@@ -36,12 +32,12 @@ impl Input {
 }
 
 pub struct Character {
-    input: Input,
     x: f64,
     y: f64,
     z: f64,
     yaw: f64,
     pitch: f64,
+    input: CharacterInput,
 }
 
 impl Character {
@@ -56,8 +52,8 @@ impl Character {
         }
     }
 
-    pub fn get_input<'a>(&'a mut self) -> &'a mut Input {
-        &mut self.input
+    pub fn set_input(&mut self, input: CharacterInput) {
+        self.input = input;
     }
 
     pub fn get_pos(&self) -> (f64, f64, f64) {

@@ -1,13 +1,16 @@
 extern crate glium;
 
-use self::glium::glutin;
-
-use model::Model;
-
 mod graphics;
 mod controls;
+mod server_interface;
 
-const TICK_SPEED: u32 = 60;
+use self::glium::glutin;
+
+use consts::TICK_SPEED;
+use self::server_interface::ServerInterface;
+use self::server_interface::LocalServerInterface;
+use model::Model;
+use model::world::character::CharacterInput;
 
 pub struct Client {
     events_loop: glutin::EventsLoop,
@@ -15,6 +18,7 @@ pub struct Client {
     controls: controls::Controls,
     closing: bool,
     model: Model,
+    server_interface: Box<ServerInterface>,
 }
 
 impl Client {
@@ -35,6 +39,7 @@ impl Client {
             controls: Default::default(),
             closing: false,
             model: Model::new(),
+            server_interface: Box::new(LocalServerInterface::new()),
         }
     }
 
@@ -48,39 +53,10 @@ impl Client {
         while !self.closing {
             next_tick_time += Duration::from_secs(1) / TICK_SPEED;
             self.handle_events();
-            {
-                use self::controls::EventInput::*;
-                use self::controls::StateInput::*;
-                use self::controls::AxisInput::*;
-                use self::controls::InputEvent::*;
-                use self::controls::InputState::*;
 
-                // TODO this should be sent to the server instead
-                let mut yaw = self.model.get_world().get_character().get_yaw();
-                let mut pitch = self.model.get_world().get_character().get_pitch();
-                for ie in self.controls.events_iter() {
-                    match ie {
-                        Trigger(Jump) => self.model.get_character_input().jump(),
-                        Toggle {input: i, state: s} => {
-                            let active = match s { Active => true, Inactive => false};
-                            match i {
-                                MoveRight => self.model.get_character_input().right = active,
-                                MoveLeft => self.model.get_character_input().left = active,
-                                MoveForward => self.model.get_character_input().forward = active,
-                                MoveBackward => self.model.get_character_input().backward = active,
-                            }
-                        },
-                        Move {input: i, value: v} => {
-                            match i {
-                                Yaw => yaw += v / 1000.0,
-                                Pitch => pitch += v / 1000.0,
-                            }
-                        },
-                    }
-                }
-                self.model.get_character_input().set_yaw(yaw);
-                self.model.get_character_input().set_pitch(pitch);
-            }
+            let character_input = self.handle_controls();
+
+            self.server_interface.tick(&mut self.model, character_input);
 
             self.model.tick();
 
@@ -130,5 +106,52 @@ impl Client {
                 Event::Suspended(sus) => println!("Event::Suspended({})", sus),
             }
         };
+    }
+
+    fn handle_controls(&mut self) -> CharacterInput {
+        use self::controls::AxisTarget::*;
+        use self::controls::StateTarget::*;
+        use self::controls::InputEvent::*;
+        use self::controls::State::*;
+
+        let mut yaw = self.model.get_world().get_character().get_yaw();
+        let mut pitch = self.model.get_world().get_character().get_pitch();
+        let mut ci: CharacterInput = CharacterInput::default();
+        for ie in self.controls.events_iter() {
+            match ie {
+                StateEvent {input, state} => {
+                    let active = match state { Active => true, Inactive => false};
+                    match input {
+                        Jump => if active {ci.jumping = true},
+                        _ => (),
+                    }
+                },
+                AxisEvent {input, value} => {
+                    match input {
+                        Yaw => yaw += value / 1000.0,
+                        Pitch => pitch += value / 1000.0,
+                    }
+                },
+            }
+        }
+        ci.set_yaw(yaw);
+        ci.set_pitch(pitch);
+        ci.forward = match self.controls.get_state(MoveForward) {
+            Active => true,
+            Inactive => false,
+        };
+        ci.backward = match self.controls.get_state(MoveBackward) {
+            Active => true,
+            Inactive => false,
+        };
+        ci.left = match self.controls.get_state(MoveLeft) {
+            Active => true,
+            Inactive => false,
+        };
+        ci.right = match self.controls.get_state(MoveRight) {
+            Active => true,
+            Inactive => false,
+        };
+        ci
     }
 }

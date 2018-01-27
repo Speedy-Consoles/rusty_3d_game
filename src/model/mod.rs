@@ -13,8 +13,8 @@ impl Model {
         }
     }
 
-    pub fn get_character_input(&mut self) -> &mut world::character::Input {
-        self.world.get_character_input()
+    pub fn set_character_input(&mut self, input: world::character::CharacterInput) {
+        self.world.set_character_input(input);
     }
 
     pub fn get_world<'a>(&'a self) -> &'a World {

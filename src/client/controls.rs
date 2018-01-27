@@ -1,37 +1,46 @@
 use std::collections::VecDeque;
+use std::collections::HashMap;
 
 use super::glium::glutin;
+use self::glutin::ElementState;
 
-#[derive(Debug)]
-pub enum InputState {
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum State {
     Active,
     Inactive,
 }
 
-#[derive(Debug)]
-pub enum StateInput {
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+pub enum StateTarget {
     MoveRight,
     MoveLeft,
     MoveForward,
     MoveBackward,
-}
-
-#[derive(Debug)]
-pub enum EventInput {
     Jump,
 }
 
-#[derive(Debug)]
-pub enum AxisInput {
+#[derive(Debug, Copy, Clone)]
+enum ButtonOrKey {
+    Button(u32),
+    Key(u32),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AxisTarget {
     Yaw,
     Pitch,
 }
 
 #[derive(Debug)]
+struct AxisMapping {
+    input: AxisTarget,
+    inverted: bool,
+}
+
+#[derive(Debug)]
 pub enum InputEvent {
-    Trigger(EventInput),
-    Move{input: AxisInput, value: f64},
-    Toggle {input: StateInput, state: InputState},
+    StateEvent {input: StateTarget, state: State },
+    AxisEvent {input: AxisTarget, value: f64},
 }
 
 pub struct InputEventIterator<'a> {
@@ -47,19 +56,17 @@ impl<'a> Iterator for InputEventIterator<'a> {
 
 pub struct Controls {
     input_events: VecDeque<InputEvent>,
-    // TODO add mapping
+    states: HashMap<StateTarget, State>,
+    key_mapping: HashMap<u32, StateTarget>,
+    button_mapping: HashMap<u32, StateTarget>,
+    axis_mapping: HashMap<u32, AxisMapping>,
 }
 
 impl Controls {
     pub fn process_device_event(&mut self, _id: glutin::DeviceId, event: glutin::DeviceEvent) {
-        // TODO use variable mapping instead
         use self::glutin::DeviceEvent as DE;
-        use self::glutin::ElementState::*;
-        use self::InputState::*;
-        use self::EventInput::*;
-        use self::StateInput::*;
-        use self::AxisInput::*;
         use self::InputEvent::*;
+        use self::ButtonOrKey::*;
         //println!("{:?}", event);
         match event {
             DE::Added => println!("Device added"),
@@ -69,40 +76,83 @@ impl Controls {
             DE::MouseMotion {delta: _d} => (),
             DE::MouseWheel {delta: _d} => (),
             // Motion unit is sensor(?) unit, not pixels!
-            DE::Motion {axis: a, value: v} => match a {
-                0 => self.input_events.push_back(Move{input: Yaw, value: -v}),
-                1 => self.input_events.push_back(Move{input: Pitch, value: -v}),
-                _ => (),
-            },
-            DE::Button {button: _b, state: _s} => (),
-            // Key only occurs on state change, no repetition
-            DE::Key(ki) => {
-                let state = match ki.state {
-                    Pressed => Active,
-                    Released => Inactive,
-                };
-                match ki.scancode {
-                    17 => self.input_events.push_back(Toggle {input: MoveForward, state: state}),
-                    31 => self.input_events.push_back(Toggle {input: MoveBackward, state: state}),
-                    30 => self.input_events.push_back(Toggle {input: MoveLeft, state: state}),
-                    32 => self.input_events.push_back(Toggle {input: MoveRight, state: state}),
-                    57 => self.input_events.push_back(Trigger(Jump)),
-                    _  => (),
+            DE::Motion { axis, mut value } => {
+                if let Some(bind) = self.axis_mapping.get(&axis) {
+                    if bind.inverted {
+                        value = -value;
+                    }
+                    self.input_events.push_back(AxisEvent { input: bind.input, value });
                 }
             },
+            DE::Button {button, state} => self.handle_button_or_key(Button(button), state),
+            // Key only occurs on state change, no repetition
+            DE::Key(ki) => self.handle_button_or_key(Key(ki.scancode), ki.state),
             DE::Text {codepoint: c} => println!("Text: {}", c),
         }
     }
 
-    pub fn events_iter<'a>(&'a mut self) -> InputEventIterator<'a> {
-        InputEventIterator{controls: self}
+    pub fn events_iter(&mut self) -> InputEventIterator {
+        InputEventIterator {controls: self}
+    }
+
+    pub fn get_state(&self, input: StateTarget) -> State {
+        *self.states.get(&input).unwrap_or(&State::Inactive)
+    }
+
+    fn handle_button_or_key(&mut self, bind: ButtonOrKey, element_state: ElementState) {
+        use self::ButtonOrKey::*;
+        use self::State::*;
+        use self::ElementState::*;
+        use self::InputEvent::StateEvent;
+
+        let map;
+        let key;
+        match bind {
+            Key(k) => {
+                map = &self.key_mapping;
+                key = k;
+            },
+            Button(k) => {
+                map = &self.button_mapping;
+                key = k;
+            },
+        }
+        if let Some(input) = map.get(&key) {
+            let state = match element_state {
+                Pressed => Active,
+                Released => Inactive,
+            };
+            let mut changed;
+            match self.states.insert(*input, state) {
+                Some(old_state) => changed = old_state != state,
+                None => changed = true,
+            }
+            if changed {
+                self.input_events.push_back(StateEvent { input: *input, state });
+            }
+        }
     }
 }
 
 impl Default for Controls {
     fn default() -> Self {
+        use self::StateTarget::*;
+        use self::AxisTarget::*;
         Controls {
             input_events: VecDeque::new(),
+            states: HashMap::new(),
+            key_mapping: vec!(
+                (17, MoveForward),
+                (31, MoveBackward),
+                (30, MoveLeft),
+                (32, MoveRight),
+                (57, Jump),
+            ).into_iter().collect(),
+            button_mapping: vec!().into_iter().collect(),
+            axis_mapping: vec!(
+                (0, AxisMapping {input: Yaw, inverted: true}),
+                (1, AxisMapping {input: Pitch, inverted: true}),
+            ).into_iter().collect(),
         }
     }
 }
