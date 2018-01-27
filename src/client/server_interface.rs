@@ -15,6 +15,7 @@ pub struct LocalServerInterface {
     start_tick_time: Instant,
     tick: u32,
     next_tick_time: Instant,
+    is_first_tick: bool,
 }
 
 impl LocalServerInterface {
@@ -23,6 +24,7 @@ impl LocalServerInterface {
             start_tick_time: Instant::now(),
             tick: 0,
             next_tick_time: Instant::now(),
+            is_first_tick: true,
         }
     }
 }
@@ -30,10 +32,16 @@ impl LocalServerInterface {
 impl ServerInterface for LocalServerInterface {
     fn tick(&mut self, model: &mut Model, input: CharacterInput) {
         let now = Instant::now();
-        let diff = now - self.start_tick_time;
-        let sec_diff = diff.as_secs() as f64 + diff.subsec_nanos() as f64 * 10e-9 ;
-        self.tick = (sec_diff / TICK_SPEED as f64).floor() as u32;
-        self.next_tick_time = self.start_tick_time + ::consts::tick_length() * self.tick;
+        if self.is_first_tick {
+            self.start_tick_time = now;
+            self.tick = 0;
+            self.is_first_tick = false;
+        } else {
+            let diff = now - self.start_tick_time;
+            let sec_diff = diff.as_secs() as f64 + diff.subsec_nanos() as f64 * 1e-9;
+            self.tick = (sec_diff * TICK_SPEED as f64).floor() as u32;
+        }
+        self.next_tick_time = self.start_tick_time + ::consts::tick_length() * (self.tick + 1);
         model.set_character_input(input);
     }
 

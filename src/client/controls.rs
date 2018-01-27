@@ -33,14 +33,14 @@ pub enum AxisTarget {
 
 #[derive(Debug)]
 struct AxisMapping {
-    input: AxisTarget,
+    target: AxisTarget,
     inverted: bool,
 }
 
 #[derive(Debug)]
 pub enum InputEvent {
-    StateEvent {input: StateTarget, state: State },
-    AxisEvent {input: AxisTarget, value: f64},
+    StateEvent { target: StateTarget, state: State },
+    AxisEvent { target: AxisTarget, value: f64},
 }
 
 pub struct InputEventIterator<'a> {
@@ -81,7 +81,7 @@ impl Controls {
                     if bind.inverted {
                         value = -value;
                     }
-                    self.input_events.push_back(AxisEvent { input: bind.input, value });
+                    self.input_events.push_back(AxisEvent { target: bind.target, value });
                 }
             },
             DE::Button {button, state} => self.handle_button_or_key(Button(button), state),
@@ -95,8 +95,8 @@ impl Controls {
         InputEventIterator {controls: self}
     }
 
-    pub fn get_state(&self, input: StateTarget) -> State {
-        *self.states.get(&input).unwrap_or(&State::Inactive)
+    pub fn get_state(&self, target: StateTarget) -> State {
+        *self.states.get(&target).unwrap_or(&State::Inactive)
     }
 
     fn handle_button_or_key(&mut self, bind: ButtonOrKey, element_state: ElementState) {
@@ -117,18 +117,18 @@ impl Controls {
                 key = k;
             },
         }
-        if let Some(input) = map.get(&key) {
+        if let Some(target) = map.get(&key) {
             let state = match element_state {
                 Pressed => Active,
                 Released => Inactive,
             };
             let mut changed;
-            match self.states.insert(*input, state) {
+            match self.states.insert(*target, state) {
                 Some(old_state) => changed = old_state != state,
                 None => changed = true,
             }
             if changed {
-                self.input_events.push_back(StateEvent { input: *input, state });
+                self.input_events.push_back(StateEvent { target: *target, state });
             }
         }
     }
@@ -150,8 +150,8 @@ impl Default for Controls {
             ).into_iter().collect(),
             button_mapping: vec!().into_iter().collect(),
             axis_mapping: vec!(
-                (0, AxisMapping {input: Yaw, inverted: true}),
-                (1, AxisMapping {input: Pitch, inverted: true}),
+                (0, AxisMapping { target: Yaw, inverted: true}),
+                (1, AxisMapping { target: Pitch, inverted: true}),
             ).into_iter().collect(),
         }
     }

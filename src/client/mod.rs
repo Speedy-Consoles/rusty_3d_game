@@ -6,7 +6,6 @@ mod server_interface;
 
 use self::glium::glutin;
 
-use consts::TICK_SPEED;
 use self::server_interface::ServerInterface;
 use self::server_interface::LocalServerInterface;
 use model::Model;
@@ -44,19 +43,17 @@ impl Client {
     }
 
     pub fn run(&mut self) {
-        use std::time::Duration;
         use std::time::Instant;
         use std::thread;
 
         // main loop
-        let mut next_tick_time = Instant::now();
         while !self.closing {
-            next_tick_time += Duration::from_secs(1) / TICK_SPEED;
             self.handle_events();
 
             let character_input = self.handle_controls();
 
             self.server_interface.tick(&mut self.model, character_input);
+            let next_tick_time = self.server_interface.get_next_tick_time();
 
             self.model.tick();
 
@@ -114,24 +111,21 @@ impl Client {
         use self::controls::InputEvent::*;
         use self::controls::State::*;
 
+        // TODO maybe we shouldn't take these values from the model
         let mut yaw = self.model.get_world().get_character().get_yaw();
         let mut pitch = self.model.get_world().get_character().get_pitch();
         let mut ci: CharacterInput = CharacterInput::default();
         for ie in self.controls.events_iter() {
             match ie {
-                StateEvent {input, state} => {
+                StateEvent {target, state} => {
                     let active = match state { Active => true, Inactive => false};
-                    match input {
+                    match target {
                         Jump => if active {ci.jumping = true},
                         _ => (),
                     }
                 },
-                AxisEvent {input, value} => {
-                    match input {
-                        Yaw => yaw += value / 1000.0,
-                        Pitch => pitch += value / 1000.0,
-                    }
-                },
+                AxisEvent {target: Yaw, value} => yaw += value / 1000.0,
+                AxisEvent {target: Pitch, value} => pitch += value / 1000.0,
             }
         }
         ci.set_yaw(yaw);
