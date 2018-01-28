@@ -119,6 +119,8 @@ impl Client {
                     WE::MouseInput { device_id, state, button, modifiers } =>
                         self.controls.process_mouse_input_event(device_id, state,
                                                                 button, modifiers),
+                    WE::MouseWheel {device_id, delta, phase, modifiers} =>
+                        self.controls.process_mouse_wheel_event(device_id, delta, phase, modifiers),
                     // CursorMoved positions have sub-pixel precision,
                     // but cursor is likely displayed at the rounded-down integer position
                     WE::CursorMoved {position: _p, ..} => (), // TODO handle menu cursor
@@ -136,10 +138,11 @@ impl Client {
     }
 
     fn handle_controls(&mut self) -> CharacterInput {
-        use self::controls::AxisTarget::*;
-        use self::controls::StateTarget::*;
-        use self::controls::InputEvent::*;
-        use self::controls::State::*;
+        use self::controls::FireTarget::*;
+        use self::controls::SwitchTarget::*;
+        use self::controls::ValueTarget::*;
+        use self::controls::ControlEvent::*;
+        use self::controls::SwitchState::*;
 
         // TODO maybe we shouldn't take these values from the model
         let old_yaw = self.model.get_world().get_character().get_yaw();
@@ -149,19 +152,16 @@ impl Client {
         let mut jumping = false;
         for ie in self.controls.get_events() {
             match ie {
-                StateEvent {target, state} => {
-                    let active = match state { Active => true, Inactive => false};
+                Fire(target) => {
                     match target {
-                        Jump => if active {jumping = true},
-                        ToggleMenu => if active {
-                            self.toggle_menu();
-                        },
-                        Exit => self.closing = active,
-                        _ => (),
+                        Jump => jumping = true,
+                        ToggleMenu => self.toggle_menu(),
+                        Exit => self.closing = true,
                     }
                 },
-                AxisEvent {target: Yaw, value} => yaw_delta += value / 1000.0,
-                AxisEvent {target: Pitch, value} => pitch_delta += value / 1000.0,
+                Value {target: Yaw, value} => yaw_delta += value / 1000.0,
+                Value {target: Pitch, value} => pitch_delta += value / 1000.0,
+                _ => (),
             }
         }
         let mut ci: CharacterInput = CharacterInput::default();
