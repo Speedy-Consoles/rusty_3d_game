@@ -1,8 +1,14 @@
+use std;
 use std::collections::VecDeque;
 use std::collections::HashMap;
 
 use super::glium::glutin;
 use self::glutin::ElementState;
+use self::glutin::VirtualKeyCode;
+use self::glutin::MouseButton;
+use self::glutin::DeviceId;
+use self::glutin::KeyboardInput;
+use self::glutin::ModifiersState;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum State {
@@ -17,12 +23,8 @@ pub enum StateTarget {
     MoveForward,
     MoveBackward,
     Jump,
-}
-
-#[derive(Debug, Copy, Clone)]
-enum ButtonOrKey {
-    Button(u32),
-    Key(u32),
+    Exit,
+    ToggleMenu,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -43,94 +45,80 @@ pub enum InputEvent {
     AxisEvent { target: AxisTarget, value: f64},
 }
 
-pub struct InputEventIterator<'a> {
-    controls: &'a mut Controls,
-}
-
-impl<'a> Iterator for InputEventIterator<'a> {
-    type Item = InputEvent;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.controls.input_events.pop_front()
-    }
-}
-
 pub struct Controls {
     input_events: VecDeque<InputEvent>,
     states: HashMap<StateTarget, State>,
-    key_mapping: HashMap<u32, StateTarget>,
-    button_mapping: HashMap<u32, StateTarget>,
-    axis_mapping: HashMap<u32, AxisMapping>,
+    // TODO mouse wheel
+    scan_code_mapping: HashMap<u32, StateTarget>, // TODO allow multiple targets
+    key_code_mapping: HashMap<VirtualKeyCode, StateTarget>, // TODO allow multiple targets
+    button_mapping: HashMap<MouseButton, StateTarget>, // TODO allow multiple targets
+    axis_mapping: HashMap<u32, AxisMapping>, // TODO allow multiple targets
 }
 
 impl Controls {
-    pub fn process_device_event(&mut self, _id: glutin::DeviceId, event: glutin::DeviceEvent) {
-        use self::glutin::DeviceEvent as DE;
+    pub fn process_motion_event(&mut self, _device_id: DeviceId, axis: u32, mut value: f64 ) {
         use self::InputEvent::*;
-        use self::ButtonOrKey::*;
-        //println!("{:?}", event);
-        match event {
-            DE::Added => println!("Device added"),
-            DE::Removed => println!("Device removed"),
-            // MouseMotion unit is sensor(?) unit, not pixels!
-            // There will also be a motion event for the axis
-            DE::MouseMotion {delta: _d} => (),
-            DE::MouseWheel {delta: _d} => (),
-            // Motion unit is sensor(?) unit, not pixels!
-            DE::Motion { axis, mut value } => {
-                if let Some(bind) = self.axis_mapping.get(&axis) {
-                    if bind.inverted {
-                        value = -value;
-                    }
-                    self.input_events.push_back(AxisEvent { target: bind.target, value });
-                }
-            },
-            DE::Button {button, state} => self.handle_button_or_key(Button(button), state),
-            // Key only occurs on state change, no repetition
-            DE::Key(ki) => self.handle_button_or_key(Key(ki.scancode), ki.state),
-            DE::Text {codepoint: c} => println!("Text: {}", c),
+        if let Some(bind) = self.axis_mapping.get(&axis) {
+            if bind.inverted {
+                value = -value;
+            }
+            self.input_events.push_back(AxisEvent { target: bind.target, value });
         }
     }
 
-    pub fn events_iter(&mut self) -> InputEventIterator {
-        InputEventIterator {controls: self}
+    pub fn process_keyboard_input_event(&mut self, _device_id: DeviceId, input: KeyboardInput ) {
+        let mut targets = Vec::new();
+
+        if let Some(&target) = self.scan_code_mapping.get(&input.scancode) {
+            targets.push(target);
+        }
+        if let Some(key_code) = input.virtual_keycode {
+            if let Some(&target) = self.key_code_mapping.get(&key_code) {
+                targets.push(target);
+            }
+        }
+        self.set_state_targets(targets, input.state);
     }
 
-    pub fn get_state(&self, target: StateTarget) -> State {
-        *self.states.get(&target).unwrap_or(&State::Inactive)
+    pub fn process_mouse_input_event(&mut self, _device_id: DeviceId, state: ElementState,
+                                     button: MouseButton, _modifiers: ModifiersState ) {
+        let mut targets = Vec::new();
+
+        if let Some(&target) = self.button_mapping.get(&button) {
+            targets.push(target);
+        }
+        self.set_state_targets(targets, state);
     }
 
-    fn handle_button_or_key(&mut self, bind: ButtonOrKey, element_state: ElementState) {
-        use self::ButtonOrKey::*;
-        use self::State::*;
+    fn set_state_targets(&mut self, targets: Vec<StateTarget>, element_state: ElementState) {
         use self::ElementState::*;
-        use self::InputEvent::StateEvent;
+        use self::State::*;
+        use self::InputEvent::*;
 
-        let map;
-        let key;
-        match bind {
-            Key(k) => {
-                map = &self.key_mapping;
-                key = k;
-            },
-            Button(k) => {
-                map = &self.button_mapping;
-                key = k;
-            },
-        }
-        if let Some(target) = map.get(&key) {
-            let state = match element_state {
-                Pressed => Active,
-                Released => Inactive,
-            };
+        let state = match element_state {
+            Pressed => Active,
+            Released => Inactive,
+        };
+        for target in targets {
             let mut changed;
-            match self.states.insert(*target, state) {
+            match self.states.insert(target, state) {
                 Some(old_state) => changed = old_state != state,
                 None => changed = true,
             }
             if changed {
-                self.input_events.push_back(StateEvent { target: *target, state });
+                self.input_events.push_back(StateEvent { target, state });
             }
         }
+    }
+
+    pub fn get_events(&mut self) -> Vec<InputEvent> {
+        let mut events = VecDeque::new();
+        std::mem::swap(&mut events, &mut self.input_events);
+        events.into()
+    }
+
+    pub fn get_state(&self, target: StateTarget) -> State {
+        *self.states.get(&target).unwrap_or(&State::Inactive)
     }
 }
 
@@ -141,12 +129,16 @@ impl Default for Controls {
         Controls {
             input_events: VecDeque::new(),
             states: HashMap::new(),
-            key_mapping: vec!(
+            scan_code_mapping: vec!(
                 (17, MoveForward),
                 (31, MoveBackward),
                 (30, MoveLeft),
                 (32, MoveRight),
                 (57, Jump),
+            ).into_iter().collect(),
+            key_code_mapping: vec!(
+                (VirtualKeyCode::Q, Exit),
+                (VirtualKeyCode::Escape, ToggleMenu),
             ).into_iter().collect(),
             button_mapping: vec!().into_iter().collect(),
             axis_mapping: vec!(

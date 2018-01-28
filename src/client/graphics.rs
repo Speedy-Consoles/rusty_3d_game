@@ -1,6 +1,7 @@
 extern crate cgmath;
 
 use super::glium;
+use super::glium::backend::glutin::Display;
 use self::cgmath::Matrix4;
 
 use model::world::World;
@@ -13,7 +14,6 @@ struct MyVertex {
 glium::implement_vertex!(MyVertex, position);
 
 pub struct Graphics {
-    display: glium::backend::glutin::Display,
     vertex_buffer: glium::VertexBuffer<MyVertex>,
     index_buffer: glium::IndexBuffer<u32>,
     program: glium::program::Program,
@@ -22,12 +22,12 @@ pub struct Graphics {
 }
 
 impl Graphics {
-    pub fn new(display: glium::Display) -> Graphics {
+    pub fn new(display: &Display) -> Graphics {
         use self::cgmath::SquareMatrix;
 
         // program
         let program = glium::Program::from_source(
-            &display,
+            display,
             &Self::load_shader_source("shader_src/vertex_shader.vert"),
             &Self::load_shader_source("shader_src/fragment_shader.frag"),
             None
@@ -35,7 +35,7 @@ impl Graphics {
 
         // background program
         let background_program = glium::Program::from_source(
-            &display,
+            display,
             &Self::load_shader_source("shader_src/background.vert"),
             &Self::load_shader_source("shader_src/background.frag"),
             None
@@ -56,7 +56,7 @@ impl Graphics {
                 position: [0.5,  0.5, 1.2]
             },
         ];
-        let vertex_buffer = glium::VertexBuffer::new(&display, vertex_data).unwrap();
+        let vertex_buffer = glium::VertexBuffer::new(display, vertex_data).unwrap();
 
         // index buffer
         let index_data = &[
@@ -64,13 +64,12 @@ impl Graphics {
             0, 2, 3,
         ];
         let index_buffer = glium::IndexBuffer::new(
-            &display,
+            display,
             glium::index::PrimitiveType::TrianglesList,
             index_data
         ).unwrap();
 
         Graphics {
-            display,
             vertex_buffer,
             index_buffer,
             program,
@@ -79,7 +78,7 @@ impl Graphics {
         }
     }
 
-    pub fn draw(&mut self, world: &World) { // the world probably shouldn't be a parameter
+    pub fn draw(&mut self, world: &World, display: &Display) {
         use self::glium::Surface;
         use self::glium::draw_parameters;
         use self::glium::uniform;
@@ -135,7 +134,7 @@ impl Graphics {
         };
 
         // background transformation matrix
-        let mut frame = self.display.draw();
+        let mut frame = display.draw();
         frame.clear_color(0.0, 0.0, 0.0, 1.0);
         frame.clear_depth(1.0);
         frame.draw(

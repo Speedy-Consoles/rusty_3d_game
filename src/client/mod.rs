@@ -5,6 +5,7 @@ mod controls;
 mod server_interface;
 
 use self::glium::glutin;
+use self::glium::backend::glutin::Display;
 
 use self::server_interface::ServerInterface;
 use self::server_interface::LocalServerInterface;
@@ -13,11 +14,13 @@ use model::world::character::CharacterInput;
 
 pub struct Client {
     events_loop: glutin::EventsLoop,
-    graphics: graphics::Graphics,
-    controls: controls::Controls,
-    closing: bool,
-    model: Model,
     server_interface: Box<ServerInterface>,
+    graphics: graphics::Graphics,
+    display: Display,
+    controls: controls::Controls,
+    model: Model,
+    closing: bool,
+    menu_active: bool,
 }
 
 impl Client {
@@ -29,16 +32,16 @@ impl Client {
         let context = glutin::ContextBuilder::new()
             .with_vsync(false);
         let display = glium::Display::new(window, context, &events_loop).unwrap();
-        display.gl_window().set_cursor(glutin::MouseCursor::NoneCursor);
-        display.gl_window().set_cursor_state(glutin::CursorState::Grab).unwrap();
 
         Client {
             events_loop,
-            graphics: graphics::Graphics::new(display),
-            controls: Default::default(),
-            closing: false,
-            model: Model::new(),
             server_interface: Box::new(LocalServerInterface::new()),
+            graphics: graphics::Graphics::new(&display),
+            display,
+            controls: Default::default(),
+            model: Model::new(),
+            closing: false,
+            menu_active: true,
         }
     }
 
@@ -57,8 +60,10 @@ impl Client {
 
             self.model.tick();
 
+            let menu_active = self.menu_active;
+            self.try_set_cursor_grab(!menu_active);
             if next_tick_time > Instant::now() {
-                self.graphics.draw(&self.model.get_world());
+                self.graphics.draw(&self.model.get_world(), &self.display);
             }
 
             let now = Instant::now();
@@ -67,38 +72,63 @@ impl Client {
                 thread::sleep(sleep_duration);
             }
         }
+
+        // clean up grab, because it might cause errors otherwise
+        self.try_set_cursor_grab(false);
+    }
+
+    fn toggle_menu(&mut self) {
+        self.menu_active = !self.menu_active;
+        if self.menu_active {
+            self.display.gl_window().set_cursor(glutin::MouseCursor::Default);
+        } else {
+            self.display.gl_window().set_cursor(glutin::MouseCursor::NoneCursor);
+        }
+    }
+
+    #[allow(unused_must_use)] // we just want to try to grab
+    fn try_set_cursor_grab(&mut self, grab: bool) {
+        if grab {
+            self.display.gl_window().set_cursor_state(glutin::CursorState::Grab);
+        } else {
+            self.display.gl_window().set_cursor_state(glutin::CursorState::Normal);
+        }
     }
 
     fn handle_events(&mut self) {
         use self::glutin::Event;
         use self::glutin::WindowEvent as WE;
+        use self::glutin::DeviceEvent as DE;
 
         let mut events = Vec::new();
         self.events_loop.poll_events(|ev| events.push(ev));
         for ev in events {
             match ev {
                 // Window events are only received if the window has focus
-                Event::WindowEvent {event: wev, ..} => match wev {
+                Event::WindowEvent { event: wev, .. } => match wev {
                     WE::Resized(width, height) =>
                         self.graphics.set_view_port(width as u64, height as u64),
                     WE::Closed => self.closing = true,
                     WE::DroppedFile(buf) => println!("File dropped: {:?}", buf),
                     WE::HoveredFile(buf) => println!("File hovered: {:?}", buf),
-                    WE::HoveredFileCancelled => println!("File hovercanceled"),
+                    WE::HoveredFileCancelled => println!("File hover canceled"),
                     WE::ReceivedCharacter(_c) => (), // TODO handle chat
                     WE::Focused(_f) => (), // TODO disable controls
-                    WE::KeyboardInput {input: i, ..} =>
-                        if i.virtual_keycode == Some(glutin::VirtualKeyCode::Q) {
-                            self.closing = true
-                        }
+                    WE::KeyboardInput { device_id, input } =>
+                        self.controls.process_keyboard_input_event(device_id, input),
+                    WE::MouseInput { device_id, state, button, modifiers } =>
+                        self.controls.process_mouse_input_event(device_id, state,
+                                                                button, modifiers),
                     // CursorMoved positions have sub-pixel precision,
                     // but cursor is likely displayed at the rounded-down integer position
                     WE::CursorMoved {position: _p, ..} => (), // TODO handle menu cursor
                     _ => (),
                 },
                 // Device events are received any time independently of the window focus
-                Event::DeviceEvent{event: dev, device_id: id}
-                        => self.controls.process_device_event(id, dev),
+                Event::DeviceEvent { device_id, event } =>
+                    if let DE::Motion { axis, value } = event {
+                        self.controls.process_motion_event(device_id, axis, value);
+                    },
                 Event::Awakened => println!("Event::Awakened"),
                 Event::Suspended(sus) => println!("Event::Suspended({})", sus),
             }
@@ -112,40 +142,53 @@ impl Client {
         use self::controls::State::*;
 
         // TODO maybe we shouldn't take these values from the model
-        let mut yaw = self.model.get_world().get_character().get_yaw();
-        let mut pitch = self.model.get_world().get_character().get_pitch();
-        let mut ci: CharacterInput = CharacterInput::default();
-        for ie in self.controls.events_iter() {
+        let old_yaw = self.model.get_world().get_character().get_yaw();
+        let old_pitch = self.model.get_world().get_character().get_pitch();
+        let mut yaw_delta = 0.0;
+        let mut pitch_delta = 0.0;
+        let mut jumping = false;
+        for ie in self.controls.get_events() {
             match ie {
                 StateEvent {target, state} => {
                     let active = match state { Active => true, Inactive => false};
                     match target {
-                        Jump => if active {ci.jumping = true},
+                        Jump => if active {jumping = true},
+                        ToggleMenu => if active {
+                            self.toggle_menu();
+                        },
+                        Exit => self.closing = active,
                         _ => (),
                     }
                 },
-                AxisEvent {target: Yaw, value} => yaw += value / 1000.0,
-                AxisEvent {target: Pitch, value} => pitch += value / 1000.0,
+                AxisEvent {target: Yaw, value} => yaw_delta += value / 1000.0,
+                AxisEvent {target: Pitch, value} => pitch_delta += value / 1000.0,
             }
         }
-        ci.set_yaw(yaw);
-        ci.set_pitch(pitch);
-        ci.forward = match self.controls.get_state(MoveForward) {
-            Active => true,
-            Inactive => false,
-        };
-        ci.backward = match self.controls.get_state(MoveBackward) {
-            Active => true,
-            Inactive => false,
-        };
-        ci.left = match self.controls.get_state(MoveLeft) {
-            Active => true,
-            Inactive => false,
-        };
-        ci.right = match self.controls.get_state(MoveRight) {
-            Active => true,
-            Inactive => false,
-        };
+        let mut ci: CharacterInput = CharacterInput::default();
+        if !self.menu_active {
+            ci.set_yaw(old_yaw + yaw_delta);
+            ci.set_pitch(old_pitch + pitch_delta);
+            ci.jumping = jumping;
+            ci.forward = match self.controls.get_state(MoveForward) {
+                Active => true,
+                Inactive => false,
+            };
+            ci.backward = match self.controls.get_state(MoveBackward) {
+                Active => true,
+                Inactive => false,
+            };
+            ci.left = match self.controls.get_state(MoveLeft) {
+                Active => true,
+                Inactive => false,
+            };
+            ci.right = match self.controls.get_state(MoveRight) {
+                Active => true,
+                Inactive => false,
+            };
+        } else {
+            ci.set_yaw(old_yaw);
+            ci.set_pitch(old_pitch);
+        }
         ci
     }
 }
