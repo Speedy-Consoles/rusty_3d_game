@@ -21,6 +21,7 @@ pub struct Client {
     model: Model,
     closing: bool,
     menu_active: bool,
+    cursor_grabbed: bool,
 }
 
 impl Client {
@@ -42,6 +43,7 @@ impl Client {
             model: Model::new(),
             closing: false,
             menu_active: true,
+            cursor_grabbed: false,
         }
     }
 
@@ -60,8 +62,10 @@ impl Client {
 
             self.model.tick();
 
-            let menu_active = self.menu_active;
-            self.try_set_cursor_grab(!menu_active);
+            if !self.menu_active != self.cursor_grabbed {
+                let menu_active = self.menu_active;
+                self.try_set_cursor_grab(!menu_active);
+            }
             if next_tick_time > Instant::now() {
                 self.graphics.draw(&self.model.get_world(), &self.display);
             }
@@ -77,8 +81,11 @@ impl Client {
         self.try_set_cursor_grab(false);
     }
 
-    fn toggle_menu(&mut self) {
-        self.menu_active = !self.menu_active;
+    fn set_menu(&mut self, active: bool) {
+        if active == self.menu_active {
+            return;
+        }
+        self.menu_active = active;
         if self.menu_active {
             self.display.gl_window().set_cursor(glutin::MouseCursor::Default);
         } else {
@@ -86,12 +93,13 @@ impl Client {
         }
     }
 
-    #[allow(unused_must_use)] // we just want to try to grab
     fn try_set_cursor_grab(&mut self, grab: bool) {
         if grab {
-            self.display.gl_window().set_cursor_state(glutin::CursorState::Grab);
+            self.cursor_grabbed
+                = self.display.gl_window().set_cursor_state(glutin::CursorState::Grab).is_ok();
         } else {
-            self.display.gl_window().set_cursor_state(glutin::CursorState::Normal);
+            self.cursor_grabbed
+                = !self.display.gl_window().set_cursor_state(glutin::CursorState::Normal).is_ok();
         }
     }
 
@@ -113,7 +121,7 @@ impl Client {
                     WE::HoveredFile(buf) => println!("File hovered: {:?}", buf),
                     WE::HoveredFileCancelled => println!("File hover canceled"),
                     WE::ReceivedCharacter(_c) => (), // TODO handle chat
-                    WE::Focused(_f) => (), // TODO disable controls
+                    WE::Focused(false) => self.set_menu(true),
                     WE::KeyboardInput { device_id, input } =>
                         self.controls.process_keyboard_input_event(device_id, input),
                     WE::MouseInput { device_id, state, button, modifiers } =>
@@ -155,7 +163,10 @@ impl Client {
                 Fire(target) => {
                     match target {
                         Jump => jumping = true,
-                        ToggleMenu => self.toggle_menu(),
+                        ToggleMenu => {
+                            let menu_active = self.menu_active;
+                            self.set_menu(!menu_active);
+                        },
                         Exit => self.closing = true,
                     }
                 },

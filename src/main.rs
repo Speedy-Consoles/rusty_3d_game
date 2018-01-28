@@ -1,4 +1,4 @@
-#![feature(use_extern_macros)]
+#![feature(use_extern_macros, entry_or_default)]
 
 mod client;
 mod model;
