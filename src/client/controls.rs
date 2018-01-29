@@ -99,14 +99,8 @@ pub struct Controls {
 impl Controls {
     fn new(binds: Vec<Bind>) -> Controls {
         use self::Bind::*;
-        use self::SwitchTarget::*;
 
-        let switch_counter =
-            vec!((MoveRight, 0),
-                 (MoveLeft, 0),
-                 (MoveForward, 0),
-                 (MoveBackward, 0),
-            ).into_iter().collect(); // TODO find a way to make sure, no target is forgotten
+        let mut switch_counter = HashMap::new();
 
         let mut push_button_mapping: HashMap<PushButton, PushButtonBinds> = HashMap::new();
         let mut axis_mapping: HashMap<u32, AxisBinds> = HashMap::new();
@@ -117,8 +111,10 @@ impl Controls {
                     .on_press.push(target),
                 OnRelease(button, target) => push_button_mapping.entry(button).or_default()
                     .on_release.push(target),
-                WhileDown(button, target) => push_button_mapping.entry(button).or_default()
-                    .while_down.push(target),
+                WhileDown(button, target) => {
+                    push_button_mapping.entry(button).or_default().while_down.push(target);
+                    switch_counter.insert(target, 0);
+                },
                 ForAxis(id, factor, target) => axis_mapping.entry(id).or_default()
                     .push(ValueBind { target, factor }),
                 OnMouseWheelUp(target) => mouse_wheel_mapping.on_positive.push(target),
@@ -191,7 +187,6 @@ impl Controls {
     pub fn process_mouse_wheel_event(&mut self, _device_id: DeviceId, delta: MouseScrollDelta,
                                      _phase: TouchPhase, _modifiers: ModifiersState) {
         use self::MouseScrollDelta::*;
-        use self::ValueBind;
         use self::ControlEvent::*;
 
         let value = match delta { // TODO also handle x and PixelDelta?
