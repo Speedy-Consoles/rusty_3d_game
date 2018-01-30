@@ -1,6 +1,8 @@
 use std;
 use std::collections::VecDeque;
 use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use super::glium::glutin;
 use self::glutin::ElementState;
@@ -18,14 +20,14 @@ pub enum SwitchState {
     Inactive,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FireTarget {
     Jump,
     Exit,
     ToggleMenu,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SwitchTarget {
     MoveRight,
     MoveLeft,
@@ -33,39 +35,33 @@ pub enum SwitchTarget {
     MoveBackward,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ValueTarget {
     Yaw,
     Pitch,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum PushButton {
     ScanCode(u32),
     KeyCode(VirtualKeyCode),
     Button(MouseButton),
 }
 
-#[derive(Debug)]
-struct ValueBind {
-    target: ValueTarget,
-    factor: f64,
-}
-
 #[derive(Debug, Default)]
 struct PushButtonBinds {
-    on_press: Vec<FireTarget>,
-    on_release: Vec<FireTarget>,
-    while_down: Vec<SwitchTarget>,
+    on_press: BTreeSet<FireTarget>,
+    on_release: BTreeSet<FireTarget>,
+    while_down: BTreeSet<SwitchTarget>,
 }
 
-type AxisBinds = Vec<ValueBind>;
+type AxisBinds = BTreeMap<ValueTarget, f64>;
 
 #[derive(Debug, Default)]
 struct MouseWheelBinds {
-    on_positive: Vec<FireTarget>,
-    on_negative: Vec<FireTarget>,
-    on_change: Vec<ValueBind>,
+    on_positive: BTreeSet<FireTarget>,
+    on_negative: BTreeSet<FireTarget>,
+    on_change: BTreeMap<ValueTarget, f64>,
 }
 
 #[derive(Debug)]
@@ -97,7 +93,7 @@ pub struct Controls {
 }
 
 impl Controls {
-    fn new(binds: Vec<Bind>) -> Controls {
+    fn from_binds(binds: Vec<Bind>) -> Controls {
         use self::Bind::*;
 
         let mut switch_counter = HashMap::new();
@@ -106,23 +102,39 @@ impl Controls {
         let mut axis_mapping: HashMap<u32, AxisBinds> = HashMap::new();
         let mut mouse_wheel_mapping: MouseWheelBinds = Default::default();
         for bind in binds {
-            match bind {
-                OnPress(button, target) => push_button_mapping.entry(button).or_default()
-                    .on_press.push(target),
-                OnRelease(button, target) => push_button_mapping.entry(button).or_default()
-                    .on_release.push(target),
-                WhileDown(button, target) => {
-                    push_button_mapping.entry(button).or_default().while_down.push(target);
+            let success = match &bind {
+                &OnPress(button, target) => push_button_mapping.entry(button).or_default()
+                    .on_press.insert(target),
+                &OnRelease(button, target) => push_button_mapping.entry(button).or_default()
+                    .on_release.insert(target),
+                &WhileDown(button, target) => {
                     switch_counter.insert(target, 0);
+                    push_button_mapping.entry(button).or_default().while_down.insert(target)
                 },
-                ForAxis(id, factor, target) => axis_mapping.entry(id).or_default()
-                    .push(ValueBind { target, factor }),
-                OnMouseWheelUp(target) => mouse_wheel_mapping.on_positive.push(target),
-                OnMouseWheelDown(target) => mouse_wheel_mapping.on_negative.push(target),
-                ForMouseWheel(factor, target) => mouse_wheel_mapping.on_change
-                    .push(ValueBind { target, factor }),
+                &ForAxis(id, factor, target) => axis_mapping.entry(id).or_default()
+                    .insert(target, factor).is_none(),
+                &OnMouseWheelUp(target) => mouse_wheel_mapping.on_positive.insert(target),
+                &OnMouseWheelDown(target) => mouse_wheel_mapping.on_negative.insert(target),
+                &ForMouseWheel(factor, target) => mouse_wheel_mapping.on_change
+                    .insert(target, factor).is_none(),
+            };
+            if !success {
+                println!("Duplicate bind:\n {:?}", bind);
             }
         }
+        Controls::new(push_button_mapping, axis_mapping, mouse_wheel_mapping)
+    }
+
+    fn new(push_button_mapping: HashMap<PushButton, PushButtonBinds>,
+           axis_mapping: HashMap<u32, AxisBinds>,
+           mouse_wheel_mapping: MouseWheelBinds) -> Controls {
+        let mut switch_counter = HashMap::new();
+        for binds in push_button_mapping.values() {
+            for &target in binds.while_down.iter() {
+                switch_counter.insert(target, 0);
+            }
+        }
+
         Controls {
             events: VecDeque::new(),
             switch_counter,
@@ -151,7 +163,7 @@ impl Controls {
     pub fn process_motion_event(&mut self, _device_id: DeviceId, axis: u32, mut value: f64) {
         use self::ControlEvent::*;
         if let Some(value_binds) = self.axis_mapping.get(&axis) {
-            for &ValueBind { target, factor } in value_binds {
+            for (&target, &factor) in value_binds {
                 value *= factor;
                 self.events.push_back(Value { target, value });
             }
@@ -203,7 +215,7 @@ impl Controls {
                 self.events.push_back(Fire(fire_target));
             }
         }
-        for &ValueBind { target, factor } in self.mouse_wheel_mapping.on_change.iter() {
+        for (&target, &factor) in self.mouse_wheel_mapping.on_change.iter() {
             self.events.push_back(Value { target, value: value * factor });
         }
     }
@@ -216,17 +228,17 @@ impl Controls {
         if let Some(binds) = self.push_button_mapping.get_mut(&push_button) {
             match element_state {
                 Pressed => {
-                    for &mut fire_target in binds.on_press.iter_mut() {
+                    for &fire_target in binds.on_press.iter() {
                         self.events.push_back(Fire(fire_target));
                     }
                 }
                 Released => {
-                    for &mut fire_target in binds.on_release.iter_mut() {
+                    for &fire_target in binds.on_release.iter() {
                         self.events.push_back(Fire(fire_target));
                     }
                 }
             }
-            for &mut switch_target in binds.while_down.iter_mut() {
+            for &switch_target in binds.while_down.iter() {
                 let counter = self.switch_counter.get_mut(&switch_target).unwrap();
                 if *counter == 0 {
                     self.events.push_back(Switch { target: switch_target, state: Active });
@@ -262,6 +274,6 @@ impl Default for Controls {
             ForAxis(0, -1.0, Yaw),
             ForAxis(1, -1.0, Pitch),
         );
-        Controls::new(binds)
+        Controls::from_binds(binds)
     }
 }

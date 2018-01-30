@@ -4,5 +4,6 @@ version = "0.1.0"
 authors = ["Speedy Consoles <rubihome@gmx.de>"]
 
 [dependencies]
-glium = "*"
+glium = "0.20.0"
 cgmath = "0.16.0"
+toml = "0.4.5"
