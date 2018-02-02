@@ -1,9 +1,14 @@
 extern crate glium;
+extern crate toml;
 
 mod graphics;
 mod controls;
 mod server_interface;
 
+use std::fs::File;
+use std::io::Read;
+
+use self::toml::value::Value;
 use self::glium::glutin;
 use self::glium::backend::glutin::Display;
 
@@ -34,12 +39,38 @@ impl Client {
             .with_vsync(false);
         let display = glium::Display::new(window, context, &events_loop).unwrap();
 
+        let mut controls = Default::default();
+
+        match File::open("client_conf.toml") {
+            Ok(mut config_file) => {
+                let mut config_string = String::new();
+                match config_file.read_to_string(&mut config_string)  {
+                    Ok(_) => {
+                        match config_string.parse::<Value>() {
+                            Ok(config_value) => {
+                                if let Some(controls_value) = config_value.get("controls") {
+                                    match controls::Controls::from_toml(controls_value) {
+                                        Ok(c) => controls = c,
+                                        Err(err) => println!("{:?}", err),
+                                    }
+                                }
+                                // TODO extract more config values
+                            },
+                            Err(err) => println!("{:?}", err)
+                        }
+                    },
+                    Err(err) => println!("{:?}", err)
+                }
+            },
+            Err(err) => println!("{:?}", err)
+        }
+
         Client {
             events_loop,
             server_interface: Box::new(LocalServerInterface::new()),
             graphics: graphics::Graphics::new(&display),
             display,
-            controls: Default::default(),
+            controls,
             model: Model::new(),
             closing: false,
             menu_active: true,
@@ -163,6 +194,8 @@ impl Client {
                 Fire(target) => {
                     match target {
                         Jump => jumping = true,
+                        NextWeapon => println!("next weapon"),
+                        PrevWeapon => println!("previous weapon"),
                         ToggleMenu => {
                             let menu_active = self.menu_active;
                             self.set_menu(!menu_active);
@@ -172,6 +205,8 @@ impl Client {
                 },
                 Value {target: Yaw, value} => yaw_delta += value / 1000.0,
                 Value {target: Pitch, value} => pitch_delta += value / 1000.0,
+                Switch { target: Shoot, state: Active } => println!("pew"),
+                Switch { target: Aim, state: Active } => println!("aim"),
                 _ => (),
             }
         }

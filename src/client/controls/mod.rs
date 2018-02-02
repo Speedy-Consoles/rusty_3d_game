@@ -1,18 +1,37 @@
+mod target;
+
 use std;
 use std::collections::VecDeque;
 use std::collections::HashMap;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
+use super::toml;
 use super::glium::glutin;
 use self::glutin::ElementState;
 use self::glutin::VirtualKeyCode;
-use self::glutin::MouseButton;
 use self::glutin::MouseScrollDelta;
 use self::glutin::TouchPhase;
 use self::glutin::DeviceId;
 use self::glutin::KeyboardInput;
 use self::glutin::ModifiersState;
+
+pub use self::target::*;
+
+#[derive(Debug)]
+pub struct ParseError(String);
+
+#[derive(Debug)]
+pub enum PushButtonState {
+    Pressed,
+    Released,
+}
+
+#[derive(Debug)]
+pub enum MouseWheelDirection {
+    Up,
+    Down,
+}
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum SwitchState {
@@ -20,32 +39,11 @@ pub enum SwitchState {
     Inactive,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum FireTarget {
-    Jump,
-    Exit,
-    ToggleMenu,
-}
-
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SwitchTarget {
-    MoveRight,
-    MoveLeft,
-    MoveForward,
-    MoveBackward,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ValueTarget {
-    Yaw,
-    Pitch,
-}
-
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum PushButton {
     ScanCode(u32),
     KeyCode(VirtualKeyCode),
-    Button(MouseButton),
+    MouseButton(glutin::MouseButton),
 }
 
 #[derive(Debug, Default)]
@@ -53,14 +51,15 @@ struct PushButtonMapping {
     on_press: BTreeSet<FireTarget>,
     on_release: BTreeSet<FireTarget>,
     while_down: BTreeSet<SwitchTarget>,
+    while_up: BTreeSet<SwitchTarget>,
 }
 
 type AxisMapping = BTreeMap<ValueTarget, f64>;
 
 #[derive(Debug, Default)]
 struct MouseWheelMapping {
-    on_positive: BTreeSet<FireTarget>,
-    on_negative: BTreeSet<FireTarget>,
+    on_up: BTreeSet<FireTarget>,
+    on_down: BTreeSet<FireTarget>,
     on_change: BTreeMap<ValueTarget, f64>,
 }
 
@@ -72,14 +71,28 @@ pub enum ControlEvent {
 }
 
 #[derive(Debug)]
+pub enum FireTrigger {
+    Button(SwitchTrigger),
+    MouseWheelTick(MouseWheelDirection),
+}
+
+#[derive(Debug)]
+pub struct SwitchTrigger {
+    button: PushButton,
+    state: PushButtonState
+}
+
+#[derive(Debug)]
+pub enum ValueTrigger {
+    MouseWheel(f64),
+    Axis { axis: u32, factor: f64 },
+}
+
+#[derive(Debug)]
 pub enum Bind {
-    OnPress(PushButton, FireTarget),
-    OnRelease(PushButton, FireTarget),
-    WhileDown(PushButton, SwitchTarget),
-    ForAxis(u32, f64, ValueTarget),
-    OnMouseWheelUp(FireTarget),
-    OnMouseWheelDown(FireTarget),
-    ForMouseWheel(f64, ValueTarget),
+    Fire(FireTrigger, FireTarget),
+    Switch(SwitchTrigger, SwitchTarget),
+    Value(ValueTrigger, ValueTarget),
 }
 
 pub struct Controls {
@@ -89,7 +102,7 @@ pub struct Controls {
     axis_mappings: HashMap<u32, AxisMapping>,
     mouse_wheel_mapping: MouseWheelMapping,
     last_key_state: HashMap<u32, ElementState>,
-    last_button_state: HashMap<MouseButton, ElementState>,
+    last_button_state: HashMap<glutin::MouseButton, ElementState>,
 }
 
 impl Controls {
@@ -105,42 +118,71 @@ impl Controls {
         }
     }
 
+    pub fn from_toml(value: &self::toml::value::Value) -> Result<Controls, ParseError> {
+        use self::toml::value::Value;
+        use self::Bind::*;
+        use self::PushButton::*;
+
+        let controls = Controls::new();
+        Err(ParseError(String::from("parsing controls not implemented")))
+    }
+
     pub fn add_bind(&mut self, bind: Bind) {
         use self::Bind::*;
 
-        match &bind {
-            &OnPress(button, target) => {
-                self.remove_fire_target_bind(target);
-                self.push_button_mappings.entry(button).or_default().on_press.insert(target)
-            },
-            &OnRelease(button, target) => {
-                self.remove_fire_target_bind(target);
-                self.push_button_mappings.entry(button).or_default().on_release.insert(target)
-            },
-            &WhileDown(button, target) => {
-                self.remove_switch_target_bind(target);
-                self.push_button_mappings.entry(button).or_default().while_down.insert(target)
-            },
-            &ForAxis(id, factor, target) => {
-                self.remove_value_target_bind(target);
-                self.axis_mappings.entry(id).or_default().insert(target, factor).is_none()
-            },
-            &OnMouseWheelUp(target) => {
-                self.remove_fire_target_bind(target);
-                self.mouse_wheel_mapping.on_positive.insert(target)
-            },
-            &OnMouseWheelDown(target) => {
-                self.remove_fire_target_bind(target);
-                self.mouse_wheel_mapping.on_negative.insert(target)
-            },
-            &ForMouseWheel(factor, target) => {
-                self.remove_value_target_bind(target);
-                self.mouse_wheel_mapping.on_change.insert(target, factor).is_none()
-            },
+        match bind {
+            Fire(trigger, target) => self.set_fire_target_trigger(trigger, target),
+            Switch(trigger, target) => self.set_switch_target_trigger(trigger, target),
+            Value(trigger, target) => self.set_value_target_trigger(trigger, target),
         };
     }
 
-    pub fn remove_fire_target_bind(&mut self, target: FireTarget) {
+    fn set_fire_target_trigger(&mut self, trigger: FireTrigger, target: FireTarget) {
+        use self::FireTrigger::*;
+        use self::PushButtonState::*;
+        use self::MouseWheelDirection::*;
+
+        self.remove_fire_target_trigger(target);
+        match trigger {
+            Button(SwitchTrigger { button, state }) => {
+                let mut mapping = self.push_button_mappings.entry(button).or_default();
+                match state {
+                    Pressed => mapping.on_press.insert(target),
+                    Released => mapping.on_release.insert(target),
+                }
+            },
+            MouseWheelTick(direction) => {
+                let mapping = &mut self.mouse_wheel_mapping;
+                match direction {
+                    Up => mapping.on_up.insert(target),
+                    Down => mapping.on_down.insert(target),
+                }
+            }
+        };
+    }
+
+    fn set_switch_target_trigger(&mut self, trigger: SwitchTrigger, target: SwitchTarget) {
+        use self::PushButtonState::*;
+
+        self.remove_switch_target_trigger(target);
+        let mapping = self.push_button_mappings.entry(trigger.button).or_default();
+        match trigger.state {
+            Pressed => mapping.while_down.insert(target),
+            Released => mapping.while_up.insert(target),
+        };
+    }
+
+    fn set_value_target_trigger(&mut self, trigger: ValueTrigger, target: ValueTarget) {
+        use self::ValueTrigger::*;
+        self.remove_value_target_trigger(target);
+        match trigger {
+            Axis { axis, factor } =>
+                self.axis_mappings.entry(axis).or_default().insert(target, factor),
+            MouseWheel(factor) => self.mouse_wheel_mapping.on_change.insert(target, factor),
+        };
+    }
+
+    pub fn remove_fire_target_trigger(&mut self, target: FireTarget) {
         for (_, mapping) in &mut self.push_button_mappings {
             if mapping.on_press.remove(&target) {
                 return
@@ -149,15 +191,15 @@ impl Controls {
                 return
             }
         }
-        if self.mouse_wheel_mapping.on_positive.remove(&target) {
+        if self.mouse_wheel_mapping.on_up.remove(&target) {
             return
         }
-        if self.mouse_wheel_mapping.on_positive.remove(&target) {
+        if self.mouse_wheel_mapping.on_up.remove(&target) {
             return
         }
     }
 
-    pub fn remove_switch_target_bind(&mut self, target: SwitchTarget) {
+    pub fn remove_switch_target_trigger(&mut self, target: SwitchTarget) {
         self.switch_counter.insert(target, 0);
         for (_, mapping) in &mut self.push_button_mappings {
             if mapping.while_down.remove(&target) {
@@ -166,7 +208,7 @@ impl Controls {
         }
     }
 
-    pub fn remove_value_target_bind(&mut self, target: ValueTarget) {
+    pub fn remove_value_target_trigger(&mut self, target: ValueTarget) {
         for (_, mapping) in &mut self.axis_mappings {
             if mapping.remove(&target).is_some() {
                 return
@@ -217,7 +259,7 @@ impl Controls {
     }
 
     pub fn process_mouse_input_event(&mut self, _device_id: DeviceId, state: ElementState,
-                                     button: MouseButton, _modifiers: ModifiersState) {
+                                     button: glutin::MouseButton, _modifiers: ModifiersState) {
         use self::PushButton::*;
 
         let last_state = self.last_button_state.insert(button, state)
@@ -225,7 +267,7 @@ impl Controls {
         if last_state == state {
             return;
         }
-        self.set_push_button_targets(Button(button), state);
+        self.set_push_button_targets(MouseButton(button), state);
     }
 
     pub fn process_mouse_wheel_event(&mut self, _device_id: DeviceId, delta: MouseScrollDelta,
@@ -239,11 +281,11 @@ impl Controls {
         };
 
         if value > 0.0 {
-            for &fire_target in self.mouse_wheel_mapping.on_positive.iter() {
+            for &fire_target in self.mouse_wheel_mapping.on_up.iter() {
                 self.events.push_back(Fire(fire_target));
             }
         } else if value < 0.0 {
-            for &fire_target in self.mouse_wheel_mapping.on_negative.iter() {
+            for &fire_target in self.mouse_wheel_mapping.on_down.iter() {
                 self.events.push_back(Fire(fire_target));
             }
         }
@@ -289,22 +331,33 @@ impl Controls {
 
 impl Default for Controls {
     fn default() -> Self {
+        use self::PushButtonState::*;
         use self::FireTarget::*;
         use self::SwitchTarget::*;
         use self::ValueTarget::*;
         use self::PushButton::*;
+        use self::FireTrigger::*;
+        use self::ValueTrigger::*;
+        use self::MouseWheelDirection::*;
+        use self::glutin::MouseButton::*;
         use self::Bind::*;
 
         let binds = vec!(
-            WhileDown(ScanCode(17), MoveForward),
-            WhileDown(ScanCode(31), MoveBackward),
-            WhileDown(ScanCode(30), MoveLeft),
-            WhileDown(ScanCode(32), MoveRight),
-            OnPress(ScanCode(57), Jump),
-            OnPress(KeyCode(VirtualKeyCode::Q), Exit),
-            OnPress(KeyCode(VirtualKeyCode::Escape), ToggleMenu),
-            ForAxis(0, -1.0, Yaw),
-            ForAxis(1, -1.0, Pitch),
+            Switch(SwitchTrigger { button: ScanCode(17), state: Pressed }, MoveForward),
+            Switch(SwitchTrigger { button: ScanCode(31), state: Pressed }, MoveBackward),
+            Switch(SwitchTrigger { button: ScanCode(30), state: Pressed }, MoveLeft),
+            Switch(SwitchTrigger { button: ScanCode(32), state: Pressed }, MoveRight),
+            Switch(SwitchTrigger { button: MouseButton(Left), state: Pressed }, Shoot),
+            Switch(SwitchTrigger { button: MouseButton(Right), state: Pressed }, Aim),
+            Fire(Button(SwitchTrigger { button: ScanCode(57), state: Pressed }), Jump),
+            Fire(Button(SwitchTrigger { button: KeyCode(VirtualKeyCode::Q), state: Pressed }),
+                 Exit),
+            Fire(Button(SwitchTrigger { button: KeyCode(VirtualKeyCode::Escape), state: Pressed }),
+                 ToggleMenu),
+            Fire(MouseWheelTick(Up), PrevWeapon),
+            Fire(MouseWheelTick(Down), NextWeapon),
+            Value(Axis { axis: 0, factor: -1.0 }, Yaw),
+            Value(Axis { axis: 1, factor: -1.0 }, Pitch),
         );
         let mut controls = Controls::new();
         for bind in binds {
