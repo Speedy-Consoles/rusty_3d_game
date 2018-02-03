@@ -1,4 +1,5 @@
-mod target;
+mod targets;
+mod triggers;
 
 use std;
 use std::collections::VecDeque;
@@ -16,7 +17,8 @@ use self::glutin::DeviceId;
 use self::glutin::KeyboardInput;
 use self::glutin::ModifiersState;
 
-pub use self::target::*;
+pub use self::targets::*;
+pub use self::triggers::*;
 
 #[derive(Debug)]
 pub struct ParseError(String);
@@ -71,24 +73,6 @@ pub enum ControlEvent {
 }
 
 #[derive(Debug)]
-pub enum FireTrigger {
-    Button(SwitchTrigger),
-    MouseWheelTick(MouseWheelDirection),
-}
-
-#[derive(Debug)]
-pub struct SwitchTrigger {
-    button: PushButton,
-    state: PushButtonState
-}
-
-#[derive(Debug)]
-pub enum ValueTrigger {
-    MouseWheel(f64),
-    Axis { axis: u32, factor: f64 },
-}
-
-#[derive(Debug)]
 pub enum Bind {
     Fire(FireTrigger, FireTarget),
     Switch(SwitchTrigger, SwitchTarget),
@@ -118,13 +102,26 @@ impl Controls {
         }
     }
 
-    pub fn from_toml(value: &self::toml::value::Value) -> Result<Controls, ParseError> {
-        use self::toml::value::Value;
+    pub fn from_toml(value: &toml::value::Value) -> Result<Controls, ParseError> {
         use self::Bind::*;
-        use self::PushButton::*;
 
-        let controls = Controls::new();
-        Err(ParseError(String::from("parsing controls not implemented")))
+        let mut controls = Controls::new();
+        let table = match value {
+            &toml::value::Value::Table(ref t) => t,
+            _ => return Err(ParseError(String::from("Controls have to be a table"))),
+        };
+        for (target_string, trigger_value) in table {
+            let bind = match target_string.parse()? {
+                Target::Fire(target) =>
+                    Fire(FireTrigger::from_toml(trigger_value)?, target),
+                Target::Switch(target) =>
+                    Switch(SwitchTrigger::from_toml(trigger_value)?, target),
+                Target::Value(target) =>
+                    Value(ValueTrigger::from_toml(trigger_value)?, target),
+            };
+            controls.add_bind(bind);
+        }
+        Ok(controls)
     }
 
     pub fn add_bind(&mut self, bind: Bind) {

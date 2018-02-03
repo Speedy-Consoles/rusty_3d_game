@@ -7,3 +7,5 @@ authors = ["Speedy Consoles <rubihome@gmx.de>"]
 glium = "0.20.0"
 cgmath = "0.16.0"
 toml = "0.4.5"
+strum = "0.8.0"
+strum_macros = "0.8.0"
