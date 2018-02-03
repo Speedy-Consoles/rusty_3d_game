@@ -21,6 +21,7 @@ pub enum SwitchTarget {
     Aim,
 }
 
+// TODO add invert attribute
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, EnumString)]
 pub enum ValueTarget {
     Yaw,

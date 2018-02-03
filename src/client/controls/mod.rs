@@ -1,12 +1,15 @@
 mod targets;
 mod triggers;
 
+extern crate num;
+
 use std;
 use std::collections::VecDeque;
 use std::collections::HashMap;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
+use self::num::cast::NumCast;
 use super::toml;
 use super::glium::glutin;
 use self::glutin::ElementState;
@@ -46,6 +49,32 @@ pub enum PushButton {
     ScanCode(u32),
     KeyCode(VirtualKeyCode),
     MouseButton(glutin::MouseButton),
+}
+
+impl PushButton {
+    pub fn from_toml(value: &toml::value::Value) -> Result<PushButton, ParseError> {
+        use self::toml::value::Value::*;
+        use self::glutin::MouseButton::*;
+        use self::PushButton::*;
+
+        match value {
+            &Integer(i) => match NumCast::from(i) {
+                Some(sc) => Ok(ScanCode(sc)),
+                None => return Err(ParseError(format!("Invalid scan code: {}", i))),
+            },
+            &String(ref s) => {
+                if let Ok(sc) = s.parse() {
+                    return Ok(ScanCode(sc));
+                }
+                match &*s.to_lowercase() {
+                    "mouseleft" => Ok(MouseButton(Left)),
+                    // TODO
+                    _ => Err(ParseError(format!("Unknown push button {}", s)))
+                }
+            }
+            _ => Err(ParseError(format!("Unknown push button {}", *value)))
+        }
+    }
 }
 
 #[derive(Debug, Default)]
