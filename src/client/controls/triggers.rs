@@ -1,3 +1,5 @@
+use std::convert::AsRef;
+
 use super::toml;
 use super::NumCast;
 
@@ -22,9 +24,9 @@ impl FireTrigger {
             Ok(Button(switch_trigger))
         } else {
             match value {
-                &String(ref s) => match &*s.to_lowercase() {
-                    "mousewheelup" => Ok(MouseWheelTick(Up)),
-                    "mousewheeldown" => Ok(MouseWheelTick(Down)),
+                &String(ref s) => match s.as_ref() {
+                    "MouseWheelUp" => Ok(MouseWheelTick(Up)),
+                    "MouseWheelDown" => Ok(MouseWheelTick(Down)),
                     _ => Err(ParseError(format!("Unknown fire trigger: '{}'", s))),
                 }
                 _ => Err(ParseError(format!("Fire trigger must be string, got '{}'!", value))),
@@ -67,6 +69,7 @@ impl SwitchTrigger {
 #[derive(Debug)]
 pub enum ValueTrigger {
     MouseWheel(f64),
+    // TODO add mouse
     Axis { axis: u32, factor: f64 },
 }
 
@@ -85,8 +88,8 @@ impl ValueTrigger {
                 };
                 factor = match t.get("sensitivity") {
                     Some(&Float(f)) => f,
-                    Some(v) =>
-                        return Err(ParseError(format!("'sensitivity' must be float, got '{}'!", v))),
+                    Some(v) => return Err(ParseError(
+                        format!("'sensitivity' must be float, got '{}'!", v))),
                     None => 1.0,
                 };
                 match t.get("inverted") {
@@ -107,8 +110,8 @@ impl ValueTrigger {
                 Some(axis) => Ok(Axis { axis, factor }),
                 None => return Err(ParseError(format!("Invalid axis id: {}", i))),
             },
-            &String(ref s) => match &*s.to_lowercase() {
-                "mousewheel" => Ok(MouseWheel(factor)),
+            &String(ref s) => match s.as_ref() {
+                "MouseWheel" => Ok(MouseWheel(factor)),
                 _ => Err(ParseError(format!("Unknown axis: '{}'", s))),
             }
             v => Err(ParseError(format!("'axis' must be integer or string, got '{}'!", v))),

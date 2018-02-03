@@ -1,5 +1,6 @@
 mod targets;
 mod triggers;
+mod push_button;
 
 extern crate num;
 
@@ -22,6 +23,7 @@ use self::glutin::ModifiersState;
 
 pub use self::targets::*;
 pub use self::triggers::*;
+pub use self::push_button::*;
 
 #[derive(Debug)]
 pub struct ParseError(String);
@@ -42,39 +44,6 @@ pub enum MouseWheelDirection {
 pub enum SwitchState {
     Active,
     Inactive,
-}
-
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum PushButton {
-    ScanCode(u32),
-    KeyCode(VirtualKeyCode),
-    MouseButton(glutin::MouseButton),
-}
-
-impl PushButton {
-    pub fn from_toml(value: &toml::value::Value) -> Result<PushButton, ParseError> {
-        use self::toml::value::Value::*;
-        use self::glutin::MouseButton::*;
-        use self::PushButton::*;
-
-        match value {
-            &Integer(i) => match NumCast::from(i) {
-                Some(sc) => Ok(ScanCode(sc)),
-                None => return Err(ParseError(format!("Invalid scan code: {}", i))),
-            },
-            &String(ref s) => {
-                if let Ok(sc) = s.parse() {
-                    return Ok(ScanCode(sc));
-                }
-                match &*s.to_lowercase() {
-                    "mouseleft" => Ok(MouseButton(Left)),
-                    // TODO
-                    _ => Err(ParseError(format!("Unknown push button {}", s)))
-                }
-            }
-            _ => Err(ParseError(format!("Unknown push button {}", *value)))
-        }
-    }
 }
 
 #[derive(Debug, Default)]
