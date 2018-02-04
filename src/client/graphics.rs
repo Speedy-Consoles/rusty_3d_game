@@ -11,7 +11,7 @@ struct MyVertex {
     position: [f32; 3],
 }
 
-glium::implement_vertex!(MyVertex, position);
+implement_vertex!(MyVertex, position);
 
 pub struct Graphics {
     vertex_buffer: glium::VertexBuffer<MyVertex>,
@@ -81,7 +81,6 @@ impl Graphics {
     pub fn draw(&mut self, world: &World, display: &Display) {
         use self::glium::Surface;
         use self::glium::draw_parameters;
-        use self::glium::uniform;
         use self::glium::vertex::EmptyVertexAttributes;
         use self::glium::index::NoIndices;
 
@@ -119,9 +118,9 @@ impl Graphics {
 
         // uniforms
         let object_to_screen_matrix_uniform: [[f32; 4]; 4] = object_to_screen_matrix.into();
-        let uniforms = uniform! {trafo_matrix: object_to_screen_matrix_uniform};
+        let uniforms = uniform! { trafo_matrix: object_to_screen_matrix_uniform };
         let screen_to_world_matrix_uniform: [[f32; 4]; 4] = world_to_screen_matrix.invert().unwrap().into();
-        let background_uniforms = uniform! {trafo_matrix: screen_to_world_matrix_uniform};
+        let background_uniforms = uniform! { trafo_matrix: screen_to_world_matrix_uniform };
 
         // draw parameters
         let draw_parameters = draw_parameters::DrawParameters {
@@ -158,13 +157,12 @@ impl Graphics {
         use std;
         use std::io::Read;
 
-        let file = std::fs::File::open(file_name)
-            .expect("Could not load vertex shader source!");
-        let mut vertex_buffer_reader = std::io::BufReader::new(file);
-        let mut vertex_shader_source = String::new();
-        vertex_buffer_reader.read_to_string(&mut vertex_shader_source)
-            .expect("Error while reading vertex shader source!");
-        vertex_shader_source
+        let file = std::fs::File::open(file_name).expect("Could not load shader source!");
+        let mut buffer_reader = std::io::BufReader::new(file);
+        let mut shader_source = String::new();
+        buffer_reader.read_to_string(&mut shader_source)
+            .expect("Error while reading shader source!");
+        shader_source
     }
 
     pub fn set_view_port(&mut self, width: u64, height: u64) {

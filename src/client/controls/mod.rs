@@ -140,7 +140,8 @@ impl Controls {
         self.remove_fire_target_trigger(target);
         match trigger {
             Button(SwitchTrigger { button, state }) => {
-                let mut mapping = self.push_button_mappings.entry(button).or_default();
+                let mut mapping = self.push_button_mappings.entry(button)
+                    .or_insert_with(Default::default);
                 match state {
                     Pressed => mapping.on_press.insert(target),
                     Released => mapping.on_release.insert(target),
@@ -160,7 +161,8 @@ impl Controls {
         use self::PushButtonState::*;
 
         self.remove_switch_target_trigger(target);
-        let mapping = self.push_button_mappings.entry(trigger.button).or_default();
+        let mapping = self.push_button_mappings.entry(trigger.button)
+            .or_insert_with(Default::default);
         match trigger.state {
             Pressed => mapping.while_down.insert(target),
             Released => mapping.while_up.insert(target),
@@ -172,7 +174,8 @@ impl Controls {
         self.remove_value_target_trigger(target);
         match trigger {
             Axis { axis, factor } =>
-                self.axis_mappings.entry(axis).or_default().insert(target, factor),
+                self.axis_mappings.entry(axis).or_insert_with(Default::default)
+                    .insert(target, factor),
             MouseWheel(factor) => self.mouse_wheel_mapping.on_change.insert(target, factor),
         };
     }
@@ -216,7 +219,7 @@ impl Controls {
     }
 
     pub fn get_events(&mut self) -> Vec<ControlEvent> {
-        let mut events = VecDeque::new();
+        let mut events = VecDeque::new();// TODO get rid of allocation
         std::mem::swap(&mut events, &mut self.events);
         events.into()
     }
@@ -233,7 +236,7 @@ impl Controls {
         use self::ControlEvent::*;
         if let Some(value_mapping) = self.axis_mappings.get(&axis) {
             for (&target, &factor) in value_mapping {
-                value *= factor;
+                value *= factor * target.get_base_factor();
                 self.events.push_back(Value { target, value });
             }
         }
@@ -351,8 +354,8 @@ impl Default for Controls {
                  ToggleMenu),
             Fire(MouseWheelTick(Up), PrevWeapon),
             Fire(MouseWheelTick(Down), NextWeapon),
-            Value(Axis { axis: 0, factor: -1.0 }, Yaw),
-            Value(Axis { axis: 1, factor: -1.0 }, Pitch),
+            Value(Axis { axis: 0, factor: 1.0 }, Yaw),
+            Value(Axis { axis: 1, factor: 1.0 }, Pitch),
         );
         let mut controls = Controls::new();
         for bind in binds {

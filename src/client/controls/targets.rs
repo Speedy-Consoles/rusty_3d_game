@@ -28,6 +28,16 @@ pub enum ValueTarget {
     Pitch,
 }
 
+impl ValueTarget {
+    pub fn get_base_factor(&self) -> f64 {
+        use self::ValueTarget::*;
+        match *self {
+            Yaw => -1.0,
+            Pitch => -1.0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Target {
     Fire(FireTarget),

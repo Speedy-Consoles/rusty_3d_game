@@ -12,11 +12,11 @@ pub struct CharacterInput {
 }
 
 impl CharacterInput {
-    pub fn set_yaw (&mut self, yaw: f64) {
+    pub fn set_yaw(&mut self, yaw: f64) {
         self.yaw = (yaw % (PI * 2.0) + (PI * 2.0)) % (PI * 2.0);
     }
 
-    pub fn set_pitch (&mut self, pitch: f64) {
+    pub fn set_pitch(&mut self, pitch: f64) {
         self.pitch = if pitch < -PI / 2.0 {
             -PI / 2.0
         } else if pitch > PI / 2.0 {

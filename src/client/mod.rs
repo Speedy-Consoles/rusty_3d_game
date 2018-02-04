@@ -93,7 +93,7 @@ impl Client {
 
             self.model.tick();
 
-            if !self.menu_active != self.cursor_grabbed {
+            if self.menu_active == self.cursor_grabbed {
                 let menu_active = self.menu_active;
                 self.try_set_cursor_grab(!menu_active);
             }
@@ -139,7 +139,7 @@ impl Client {
         use self::glutin::WindowEvent as WE;
         use self::glutin::DeviceEvent as DE;
 
-        let mut events = Vec::new();
+        let mut events = Vec::new(); // TODO get rid of allocation
         self.events_loop.poll_events(|ev| events.push(ev));
         for ev in events {
             match ev {
@@ -183,9 +183,6 @@ impl Client {
         use self::controls::ControlEvent::*;
         use self::controls::SwitchState::*;
 
-        // TODO maybe we shouldn't take these values from the model
-        let old_yaw = self.model.get_world().get_character().get_yaw();
-        let old_pitch = self.model.get_world().get_character().get_pitch();
         let mut yaw_delta = 0.0;
         let mut pitch_delta = 0.0;
         let mut jumping = false;
@@ -210,7 +207,10 @@ impl Client {
                 _ => (),
             }
         }
-        let mut ci: CharacterInput = CharacterInput::default();
+        // TODO maybe we shouldn't take these values from the model
+        let old_yaw = self.model.get_world().get_character().get_yaw();
+        let old_pitch = self.model.get_world().get_character().get_pitch();
+        let mut ci = CharacterInput::default();
         if !self.menu_active {
             ci.set_yaw(old_yaw + yaw_delta);
             ci.set_pitch(old_pitch + pitch_delta);

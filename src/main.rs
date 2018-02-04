@@ -1,4 +1,5 @@
-#![feature(use_extern_macros, entry_or_default)]
+#[macro_use]
+extern crate glium;
 extern crate strum;
 #[macro_use]
 extern crate strum_macros;
