@@ -1,6 +1,5 @@
 mod targets;
 mod triggers;
-mod push_button;
 
 extern crate num;
 
@@ -22,16 +21,9 @@ use self::glutin::ModifiersState;
 
 pub use self::targets::*;
 pub use self::triggers::*;
-pub use self::push_button::*;
 
 #[derive(Debug)]
 pub struct ParseError(String);
-
-#[derive(Debug, PartialEq)]
-pub enum PushButtonState {
-    Pressed,
-    Released,
-}
 
 #[derive(Debug, PartialEq)]
 pub enum MouseWheelDirection {
@@ -45,8 +37,15 @@ pub enum SwitchState {
     Inactive,
 }
 
+#[derive(Debug)]
+pub enum Bind {
+    Fire(FireTrigger, FireTarget),
+    Switch(SwitchTrigger, SwitchTarget),
+    Value(ValueTrigger, ValueTarget),
+}
+
 #[derive(Debug, Default)]
-struct PushButtonMapping {
+struct SwitchTriggerMapping {
     on_press: BTreeSet<FireTarget>,
     while_down: BTreeSet<SwitchTarget>,
 }
@@ -67,17 +66,10 @@ pub enum ControlEvent {
     Value { target: ValueTarget, value: f64 },
 }
 
-#[derive(Debug)]
-pub enum Bind {
-    Fire(FireTrigger, FireTarget),
-    Switch(SwitchTrigger, SwitchTarget),
-    Value(ValueTrigger, ValueTarget),
-}
-
 pub struct Controls {
     events: VecDeque<ControlEvent>,
     switch_counter: HashMap<SwitchTarget, u32>,
-    push_button_mappings: HashMap<PushButton, PushButtonMapping>,
+    push_button_mappings: HashMap<SwitchTrigger, SwitchTriggerMapping>,
     axis_mappings: HashMap<u32, AxisMapping>,
     mouse_wheel_mapping: MouseWheelMapping,
     value_factors: HashMap<ValueTarget, f64>,
@@ -163,17 +155,13 @@ impl Controls {
 
     fn set_fire_target_trigger(&mut self, trigger: FireTrigger, target: FireTarget) {
         use self::FireTrigger::*;
-        use self::PushButtonState::*;
         use self::MouseWheelDirection::*;
 
         self.remove_fire_target_trigger(target);
         match trigger {
-            Button(SwitchTrigger { button, state }) => {
-                let mut mapping = self.push_button_mappings.entry(button)
-                    .or_insert_with(Default::default);
-                if state == Pressed {
-                    mapping.on_press.insert(target);
-                }
+            Button(button) => {
+                self.push_button_mappings.entry(button).or_insert_with(Default::default)
+                    .on_press.insert(target);
             },
             MouseWheelTick(direction) => {
                 let mapping = &mut self.mouse_wheel_mapping;
@@ -186,14 +174,9 @@ impl Controls {
     }
 
     fn set_switch_target_trigger(&mut self, trigger: SwitchTrigger, target: SwitchTarget) {
-        use self::PushButtonState::*;
-
         self.remove_switch_target_trigger(target);
-        let mapping = self.push_button_mappings.entry(trigger.button)
-            .or_insert_with(Default::default);
-        if trigger.state == Pressed {
-            mapping.while_down.insert(target);
-        };
+        self.push_button_mappings.entry(trigger).or_insert_with(Default::default)
+            .while_down.insert(target);
     }
 
     fn set_value_target_trigger(&mut self, trigger: ValueTrigger, target: ValueTarget) {
@@ -276,7 +259,7 @@ impl Controls {
     }
 
     pub fn process_keyboard_input_event(&mut self, _device_id: DeviceId, input: KeyboardInput) {
-        use self::PushButton::*;
+        use self::SwitchTrigger::*;
 
         let last_state = self.last_key_state.insert(input.scancode, input.state)
             .unwrap_or(ElementState::Released);
@@ -284,21 +267,21 @@ impl Controls {
             return;
         }
         if let Some(key_code) = input.virtual_keycode {
-            self.set_push_button_targets(KeyCode(key_code), input.state);
+            self.handle_switch_trigger(KeyCode(key_code), input.state);
         }
-        self.set_push_button_targets(ScanCode(input.scancode), input.state);
+        self.handle_switch_trigger(ScanCode(input.scancode), input.state);
     }
 
     pub fn process_mouse_input_event(&mut self, _device_id: DeviceId, state: ElementState,
                                      button: glutin::MouseButton, _modifiers: ModifiersState) {
-        use self::PushButton::*;
+        use self::SwitchTrigger::*;
 
         let last_state = self.last_button_state.insert(button, state)
             .unwrap_or(ElementState::Released);
         if last_state == state {
             return;
         }
-        self.set_push_button_targets(MouseButton(button), state);
+        self.handle_switch_trigger(MouseButton(button), state);
     }
 
     pub fn process_mouse_wheel_event(&mut self, _device_id: DeviceId, delta: MouseScrollDelta,
@@ -325,7 +308,7 @@ impl Controls {
         }
     }
 
-    fn set_push_button_targets(&mut self, push_button: PushButton, state: ElementState) {
+    fn handle_switch_trigger(&mut self, push_button: SwitchTrigger, state: ElementState) {
         use self::ElementState::*;
         use self::SwitchState::*;
         use self::ControlEvent::*;
@@ -355,11 +338,10 @@ impl Controls {
 
 impl Default for Controls {
     fn default() -> Self {
-        use self::PushButtonState::*;
         use self::FireTarget::*;
         use self::SwitchTarget::*;
         use self::ValueTarget::*;
-        use self::PushButton::*;
+        use self::SwitchTrigger::*;
         use self::FireTrigger::*;
         use self::ValueTrigger::*;
         use self::MouseWheelDirection::*;
@@ -367,17 +349,15 @@ impl Default for Controls {
         use self::Bind::*;
 
         let binds = vec!(
-            Switch(SwitchTrigger { button: ScanCode(17), state: Pressed }, MoveForward),
-            Switch(SwitchTrigger { button: ScanCode(31), state: Pressed }, MoveBackward),
-            Switch(SwitchTrigger { button: ScanCode(30), state: Pressed }, MoveLeft),
-            Switch(SwitchTrigger { button: ScanCode(32), state: Pressed }, MoveRight),
-            Switch(SwitchTrigger { button: MouseButton(Left), state: Pressed }, Shoot),
-            Switch(SwitchTrigger { button: MouseButton(Right), state: Pressed }, Aim),
-            Fire(Button(SwitchTrigger { button: ScanCode(57), state: Pressed }), Jump),
-            Fire(Button(SwitchTrigger { button: KeyCode(VirtualKeyCode::Q), state: Pressed }),
-                 Exit),
-            Fire(Button(SwitchTrigger { button: KeyCode(VirtualKeyCode::Escape), state: Pressed }),
-                 ToggleMenu),
+            Switch(ScanCode(17), MoveForward),
+            Switch(ScanCode(31), MoveBackward),
+            Switch(ScanCode(30), MoveLeft),
+            Switch(ScanCode(32), MoveRight),
+            Switch(MouseButton(Left), Shoot),
+            Switch(MouseButton(Right), Aim),
+            Fire(Button(ScanCode(57)), Jump),
+            Fire(Button(KeyCode(VirtualKeyCode::Q)), Exit),
+            Fire(Button(KeyCode(VirtualKeyCode::Escape)), ToggleMenu),
             Fire(MouseWheelTick(Up), PrevWeapon),
             Fire(MouseWheelTick(Down), NextWeapon),
             Value(Axis(0), Yaw),
