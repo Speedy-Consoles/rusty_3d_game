@@ -7,7 +7,6 @@ extern crate num;
 use std;
 use std::collections::VecDeque;
 use std::collections::HashMap;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use self::num::cast::NumCast;
@@ -28,13 +27,13 @@ pub use self::push_button::*;
 #[derive(Debug)]
 pub struct ParseError(String);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum PushButtonState {
     Pressed,
     Released,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum MouseWheelDirection {
     Up,
     Down,
@@ -49,19 +48,17 @@ pub enum SwitchState {
 #[derive(Debug, Default)]
 struct PushButtonMapping {
     on_press: BTreeSet<FireTarget>,
-    on_release: BTreeSet<FireTarget>,
     while_down: BTreeSet<SwitchTarget>,
-    while_up: BTreeSet<SwitchTarget>,
 }
-
-type AxisMapping = BTreeMap<ValueTarget, f64>;
 
 #[derive(Debug, Default)]
 struct MouseWheelMapping {
     on_up: BTreeSet<FireTarget>,
     on_down: BTreeSet<FireTarget>,
-    on_change: BTreeMap<ValueTarget, f64>,
+    on_change: BTreeSet<ValueTarget>,
 }
+
+type AxisMapping = BTreeSet<ValueTarget>;
 
 #[derive(Debug)]
 pub enum ControlEvent {
@@ -83,6 +80,7 @@ pub struct Controls {
     push_button_mappings: HashMap<PushButton, PushButtonMapping>,
     axis_mappings: HashMap<u32, AxisMapping>,
     mouse_wheel_mapping: MouseWheelMapping,
+    value_factors: HashMap<ValueTarget, f64>,
     last_key_state: HashMap<u32, ElementState>,
     last_button_state: HashMap<glutin::MouseButton, ElementState>,
 }
@@ -95,6 +93,7 @@ impl Controls {
             push_button_mappings: HashMap::new(),
             axis_mappings: HashMap::new(),
             mouse_wheel_mapping: Default::default(),
+            value_factors: HashMap::new(),
             last_key_state: HashMap::new(),
             last_button_state: HashMap::new(),
         }
@@ -102,24 +101,54 @@ impl Controls {
 
     pub fn from_toml(value: &toml::value::Value) -> Result<Controls, ParseError> {
         use self::Bind::*;
+        use self::toml::value::Value::Table;
+        use self::toml::value::Value::Float;
 
         let mut controls = Controls::new();
         let table = match value {
-            &toml::value::Value::Table(ref t) => t,
-            _ => return Err(ParseError(String::from("Controls have to be a table"))),
+            &Table(ref t) => t,
+            _ => return Err(ParseError(String::from("Controls must be a table!"))),
         };
-        for (target_string, trigger_value) in table {
-            let bind = match target_string.parse()? {
-                Target::Fire(target) =>
-                    Fire(FireTrigger::from_toml(trigger_value)?, target),
-                Target::Switch(target) =>
-                    Switch(SwitchTrigger::from_toml(trigger_value)?, target),
-                Target::Value(target) =>
-                    Value(ValueTrigger::from_toml(trigger_value)?, target),
-            };
-            controls.add_bind(bind);
+
+        match table.get("binds") {
+            Some(v) => match v {
+                &Table(ref keys) => for (target_string, trigger_value) in keys {
+                    let bind = match target_string.parse()? {
+                        Target::Fire(target) =>
+                            Fire(FireTrigger::from_toml(trigger_value)?, target),
+                        Target::Switch(target) =>
+                            Switch(SwitchTrigger::from_toml(trigger_value)?, target),
+                        Target::Value(target) =>
+                            Value(ValueTrigger::from_toml(trigger_value)?, target),
+                    };
+                    controls.add_bind(bind);
+                },
+                _ => return Err(ParseError(String::from("Binds must be a table!"))),
+            },
+            None => return Err(ParseError(String::from("No binds section found in controls!"))),
+        }
+        match table.get("factors") {
+            Some(v) => match v {
+                &Table(ref factors) => for (target_string, trigger_value) in factors {
+                    match target_string.parse()? {
+                        Target::Value(target) => match trigger_value {
+                            &Float(factor) => controls.set_factor(target, factor),
+                            v => return Err(ParseError(
+                                format!("Factor must be a float, got '{}'!", v)
+                            )),
+                        }
+                        _ => return Err(ParseError(format!("Expected value target!"))),
+                    };
+                },
+                _ => return Err(ParseError(String::from("Binds must be a table!"))),
+            },
+            None => return Err(ParseError(String::from("No binds section found in controls!"))),
         }
         Ok(controls)
+    }
+
+    pub fn set_factor(&mut self, target: ValueTarget, factor: f64) {
+        self.value_factors.insert(target, factor);
     }
 
     pub fn add_bind(&mut self, bind: Bind) {
@@ -142,9 +171,8 @@ impl Controls {
             Button(SwitchTrigger { button, state }) => {
                 let mut mapping = self.push_button_mappings.entry(button)
                     .or_insert_with(Default::default);
-                match state {
-                    Pressed => mapping.on_press.insert(target),
-                    Released => mapping.on_release.insert(target),
+                if state == Pressed {
+                    mapping.on_press.insert(target);
                 }
             },
             MouseWheelTick(direction) => {
@@ -152,7 +180,7 @@ impl Controls {
                 match direction {
                     Up => mapping.on_up.insert(target),
                     Down => mapping.on_down.insert(target),
-                }
+                };
             }
         };
     }
@@ -163,9 +191,8 @@ impl Controls {
         self.remove_switch_target_trigger(target);
         let mapping = self.push_button_mappings.entry(trigger.button)
             .or_insert_with(Default::default);
-        match trigger.state {
-            Pressed => mapping.while_down.insert(target),
-            Released => mapping.while_up.insert(target),
+        if trigger.state == Pressed {
+            mapping.while_down.insert(target);
         };
     }
 
@@ -173,10 +200,18 @@ impl Controls {
         use self::ValueTrigger::*;
         self.remove_value_target_trigger(target);
         match trigger {
-            Axis { axis, factor } =>
-                self.axis_mappings.entry(axis).or_insert_with(Default::default)
-                    .insert(target, factor),
-            MouseWheel(factor) => self.mouse_wheel_mapping.on_change.insert(target, factor),
+            MouseX => {
+                // TODO
+            },
+            MouseY => {
+                // TODO
+            },
+            MouseWheel => {
+                self.mouse_wheel_mapping.on_change.insert(target);
+            },
+            Axis(axis) => {
+                self.axis_mappings.entry(axis).or_insert_with(Default::default).insert(target);
+            },
         };
     }
 
@@ -185,14 +220,11 @@ impl Controls {
             if mapping.on_press.remove(&target) {
                 return
             }
-            if mapping.on_release.remove(&target) {
-                return
-            }
         }
         if self.mouse_wheel_mapping.on_up.remove(&target) {
             return
         }
-        if self.mouse_wheel_mapping.on_up.remove(&target) {
+        if self.mouse_wheel_mapping.on_down.remove(&target) {
             return
         }
     }
@@ -208,12 +240,12 @@ impl Controls {
 
     pub fn remove_value_target_trigger(&mut self, target: ValueTarget) {
         for (_, mapping) in &mut self.axis_mappings {
-            if mapping.remove(&target).is_some() {
+            if mapping.remove(&target) {
                 return
             }
         }
 
-        if self.mouse_wheel_mapping.on_change.remove(&target).is_some() {
+        if self.mouse_wheel_mapping.on_change.remove(&target) {
             return
         }
     }
@@ -234,8 +266,9 @@ impl Controls {
 
     pub fn process_motion_event(&mut self, _device_id: DeviceId, axis: u32, mut value: f64) {
         use self::ControlEvent::*;
-        if let Some(value_mapping) = self.axis_mappings.get(&axis) {
-            for (&target, &factor) in value_mapping {
+        if let Some(mapping) = self.axis_mappings.get(&axis) {
+            for &target in mapping {
+                let factor = self.value_factors.get(&target).unwrap_or(&1.0);
                 value *= factor * target.get_base_factor();
                 self.events.push_back(Value { target, value });
             }
@@ -287,27 +320,20 @@ impl Controls {
                 self.events.push_back(Fire(fire_target));
             }
         }
-        for (&target, &factor) in self.mouse_wheel_mapping.on_change.iter() {
-            self.events.push_back(Value { target, value: value * factor });
+        for &target in self.mouse_wheel_mapping.on_change.iter() {
+            self.events.push_back(Value { target, value: value });
         }
     }
 
-    fn set_push_button_targets(&mut self, push_button: PushButton, element_state: ElementState) {
+    fn set_push_button_targets(&mut self, push_button: PushButton, state: ElementState) {
         use self::ElementState::*;
         use self::SwitchState::*;
         use self::ControlEvent::*;
 
         if let Some(mapping) = self.push_button_mappings.get_mut(&push_button) {
-            match element_state {
-                Pressed => {
-                    for &fire_target in mapping.on_press.iter() {
-                        self.events.push_back(Fire(fire_target));
-                    }
-                }
-                Released => {
-                    for &fire_target in mapping.on_release.iter() {
-                        self.events.push_back(Fire(fire_target));
-                    }
+            if state == Pressed {
+                for &fire_target in mapping.on_press.iter() {
+                    self.events.push_back(Fire(fire_target));
                 }
             }
             for &switch_target in mapping.while_down.iter() {
@@ -315,7 +341,7 @@ impl Controls {
                 if *counter == 0 {
                     self.events.push_back(Switch { target: switch_target, state: Active });
                 }
-                match element_state {
+                match state {
                     Pressed => *counter += 1,
                     Released => *counter -= 1,
                 }
@@ -354,8 +380,8 @@ impl Default for Controls {
                  ToggleMenu),
             Fire(MouseWheelTick(Up), PrevWeapon),
             Fire(MouseWheelTick(Down), NextWeapon),
-            Value(Axis { axis: 0, factor: 1.0 }, Yaw),
-            Value(Axis { axis: 1, factor: 1.0 }, Pitch),
+            Value(Axis(0), Yaw),
+            Value(Axis(1), Pitch),
         );
         let mut controls = Controls::new();
         for bind in binds {

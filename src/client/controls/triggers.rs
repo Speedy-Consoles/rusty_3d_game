@@ -68,9 +68,10 @@ impl SwitchTrigger {
 
 #[derive(Debug)]
 pub enum ValueTrigger {
-    MouseWheel(f64),
-    // TODO add mouse
-    Axis { axis: u32, factor: f64 },
+    MouseX,
+    MouseY,
+    MouseWheel,
+    Axis(u32),
 }
 
 impl ValueTrigger {
@@ -78,40 +79,13 @@ impl ValueTrigger {
         use self::toml::value::Value::*;
         use self::ValueTrigger::*;
 
-        let axis_value;
-        let mut factor;
         match value {
-            &Table(ref t) => {
-                axis_value = match t.get("axis") {
-                    Some(v) => v,
-                    None => return Err(ParseError("No axis specified!".into())),
-                };
-                factor = match t.get("sensitivity") {
-                    Some(&Float(f)) => f,
-                    Some(v) => return Err(ParseError(
-                        format!("'sensitivity' must be float, got '{}'!", v))),
-                    None => 1.0,
-                };
-                match t.get("inverted") {
-                    Some(&Boolean(true)) => factor *= -1.0,
-                    Some(&Boolean(false)) => (),
-                    Some(v) =>
-                        return Err(ParseError(format!("'inverted' must be bool, got '{}'!", v))),
-                    None => (),
-                };
-            },
-            v => {
-                axis_value = v;
-                factor = 1.0;
-            },
-        }
-        match axis_value {
             &Integer(i) => match NumCast::from(i) {
-                Some(axis) => Ok(Axis { axis, factor }),
+                Some(axis) => Ok(Axis(axis)),
                 None => return Err(ParseError(format!("Invalid axis id: {}", i))),
             },
             &String(ref s) => match s.as_ref() {
-                "MouseWheel" => Ok(MouseWheel(factor)),
+                "MouseWheel" => Ok(MouseWheel),
                 _ => Err(ParseError(format!("Unknown axis: '{}'", s))),
             }
             v => Err(ParseError(format!("'axis' must be integer or string, got '{}'!", v))),
