@@ -7,8 +7,11 @@ use std;
 use std::collections::VecDeque;
 use std::collections::HashMap;
 use std::collections::BTreeSet;
+use std::collections::BTreeMap;
+use std::string::ToString;
 
 use self::num::cast::NumCast;
+use strum::IntoEnumIterator;
 use super::toml;
 use super::glium::glutin;
 use self::glutin::ElementState;
@@ -19,11 +22,9 @@ use self::glutin::DeviceId;
 use self::glutin::KeyboardInput;
 use self::glutin::ModifiersState;
 
+use shared::ConfigParseError;
 pub use self::targets::*;
 pub use self::triggers::*;
-
-#[derive(Debug)]
-pub struct ParseError(String);
 
 #[derive(Debug, PartialEq)]
 pub enum MouseWheelDirection {
@@ -69,7 +70,7 @@ pub enum ControlEvent {
 pub struct Controls {
     events: VecDeque<ControlEvent>,
     switch_counter: HashMap<SwitchTarget, u32>,
-    push_button_mappings: HashMap<SwitchTrigger, SwitchTriggerMapping>,
+    switch_trigger_mappings: HashMap<SwitchTrigger, SwitchTriggerMapping>,
     axis_mappings: HashMap<u32, AxisMapping>,
     mouse_wheel_mapping: MouseWheelMapping,
     value_factors: HashMap<ValueTarget, f64>,
@@ -82,7 +83,7 @@ impl Controls {
         Controls {
             events: VecDeque::new(),
             switch_counter: HashMap::new(),
-            push_button_mappings: HashMap::new(),
+            switch_trigger_mappings: HashMap::new(),
             axis_mappings: HashMap::new(),
             mouse_wheel_mapping: Default::default(),
             value_factors: HashMap::new(),
@@ -91,7 +92,7 @@ impl Controls {
         }
     }
 
-    pub fn from_toml(value: &toml::value::Value) -> Result<Controls, ParseError> {
+    pub fn from_toml(value: &toml::value::Value) -> Result<Controls, ConfigParseError> {
         use self::Bind::*;
         use self::toml::value::Value::Table;
         use self::toml::value::Value::Float;
@@ -99,7 +100,7 @@ impl Controls {
         let mut controls = Controls::new();
         let table = match value {
             &Table(ref t) => t,
-            _ => return Err(ParseError(String::from("Controls must be a table!"))),
+            _ => return Err(ConfigParseError(String::from("Controls must be a table!"))),
         };
 
         match table.get("binds") {
@@ -115,9 +116,9 @@ impl Controls {
                     };
                     controls.add_bind(bind);
                 },
-                _ => return Err(ParseError(String::from("Binds must be a table!"))),
+                _ => return Err(ConfigParseError(String::from("Binds must be a table!"))),
             },
-            None => return Err(ParseError(String::from("No binds section found in controls!"))),
+            None => return Err(ConfigParseError(String::from("No binds section found in controls!"))),
         }
         match table.get("factors") {
             Some(v) => match v {
@@ -125,18 +126,59 @@ impl Controls {
                     match target_string.parse()? {
                         Target::Value(target) => match trigger_value {
                             &Float(factor) => controls.set_factor(target, factor),
-                            v => return Err(ParseError(
+                            v => return Err(ConfigParseError(
                                 format!("Factor must be a float, got '{}'!", v)
                             )),
                         }
-                        _ => return Err(ParseError(format!("Expected value target!"))),
+                        _ => return Err(ConfigParseError(format!("Expected value target!"))),
                     };
                 },
-                _ => return Err(ParseError(String::from("Binds must be a table!"))),
+                _ => return Err(ConfigParseError(String::from("Binds must be a table!"))),
             },
-            None => return Err(ParseError(String::from("No binds section found in controls!"))),
+            None => return Err(ConfigParseError(String::from("No binds section found in controls!"))),
         }
         Ok(controls)
+    }
+
+    pub fn to_toml(&self) -> toml::value::Value {
+        use self::FireTrigger::*;
+        use self::ValueTrigger::*;
+        use self::MouseWheelDirection::*;
+        use self::toml::value::Value::Table;
+        use self::toml::value::Value::Float;
+
+        let mut binds = BTreeMap::new();
+        for (&trigger, mapping) in self.switch_trigger_mappings.iter() {
+            for target in mapping.on_press.iter() {
+                binds.insert(target.to_string(), Button(trigger).to_toml());
+            }
+            for target in mapping.while_down.iter() {
+                binds.insert(target.to_string(), trigger.to_toml());
+            }
+        }
+        for (&axis, mapping) in self.axis_mappings.iter() {
+            for target in mapping {
+                binds.insert(target.to_string(), toml::value::Value::Integer(axis as i64));
+            }
+        }
+        for target in self.mouse_wheel_mapping.on_up.iter() {
+            binds.insert(target.to_string(), MouseWheelTick(Up).to_toml());
+        }
+        for target in self.mouse_wheel_mapping.on_down.iter() {
+            binds.insert(target.to_string(), MouseWheelTick(Down).to_toml());
+        }
+        for target in self.mouse_wheel_mapping.on_change.iter() {
+            binds.insert(target.to_string(), MouseWheel.to_toml());
+        }
+
+        let mut factors = BTreeMap::new(); // TODO maybe just clone?
+        for (target, &factor) in self.value_factors.iter() {
+            factors.insert(target.to_string(), Float(factor));
+        }
+        Table(vec![
+            (String::from("binds"), Table(binds)),
+            (String::from("factors"), Table(factors)),
+        ].into_iter().collect())
     }
 
     pub fn set_factor(&mut self, target: ValueTarget, factor: f64) {
@@ -160,7 +202,7 @@ impl Controls {
         self.remove_fire_target_trigger(target);
         match trigger {
             Button(button) => {
-                self.push_button_mappings.entry(button).or_insert_with(Default::default)
+                self.switch_trigger_mappings.entry(button).or_insert_with(Default::default)
                     .on_press.insert(target);
             },
             MouseWheelTick(direction) => {
@@ -175,7 +217,7 @@ impl Controls {
 
     fn set_switch_target_trigger(&mut self, trigger: SwitchTrigger, target: SwitchTarget) {
         self.remove_switch_target_trigger(target);
-        self.push_button_mappings.entry(trigger).or_insert_with(Default::default)
+        self.switch_trigger_mappings.entry(trigger).or_insert_with(Default::default)
             .while_down.insert(target);
     }
 
@@ -199,7 +241,7 @@ impl Controls {
     }
 
     pub fn remove_fire_target_trigger(&mut self, target: FireTarget) {
-        for (_, mapping) in &mut self.push_button_mappings {
+        for (_, mapping) in &mut self.switch_trigger_mappings {
             if mapping.on_press.remove(&target) {
                 return
             }
@@ -214,7 +256,7 @@ impl Controls {
 
     pub fn remove_switch_target_trigger(&mut self, target: SwitchTarget) {
         self.switch_counter.insert(target, 0);
-        for (_, mapping) in &mut self.push_button_mappings {
+        for (_, mapping) in &mut self.switch_trigger_mappings {
             if mapping.while_down.remove(&target) {
                 return
             }
@@ -313,7 +355,7 @@ impl Controls {
         use self::SwitchState::*;
         use self::ControlEvent::*;
 
-        if let Some(mapping) = self.push_button_mappings.get_mut(&push_button) {
+        if let Some(mapping) = self.switch_trigger_mappings.get_mut(&push_button) {
             if state == Pressed {
                 for &fire_target in mapping.on_press.iter() {
                     self.events.push_back(Fire(fire_target));
@@ -366,6 +408,9 @@ impl Default for Controls {
         let mut controls = Controls::new();
         for bind in binds {
             controls.add_bind(bind);
+        }
+        for target in ValueTarget::iter() {
+            controls.set_factor(target, 1.0);
         }
         controls
     }

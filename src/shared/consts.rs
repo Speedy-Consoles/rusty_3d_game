@@ -8,6 +8,7 @@ pub fn tick_length() -> Duration {
 }
 
 // client
+pub const CLIENT_CONFIG_FILE: &'static str = "client_conf.toml";
 pub const OPTIMAL_SCREEN_RATIO: f64 = 16.0 / 9.0;
 pub const Y_FOV: f64 = PI / 3.0;
 pub const Z_NEAR: f64 = 0.1;

@@ -6,7 +6,7 @@ extern crate strum_macros;
 
 mod client;
 mod model;
-mod consts;
+mod shared;
 
 fn main() {
     let mut client = client::Client::new();

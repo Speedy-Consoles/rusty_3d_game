@@ -3,17 +3,15 @@ extern crate toml;
 
 mod graphics;
 mod controls;
+mod config;
 mod server_interface;
 
-use std::fs::File;
-use std::io::Read;
-
-use self::toml::value::Value;
 use self::glium::glutin;
 use self::glium::backend::glutin::Display;
 
 use self::server_interface::ServerInterface;
 use self::server_interface::LocalServerInterface;
+use self::config::Config;
 use model::Model;
 use model::world::character::CharacterInput;
 
@@ -22,7 +20,7 @@ pub struct Client {
     server_interface: Box<ServerInterface>,
     graphics: graphics::Graphics,
     display: Display,
-    controls: controls::Controls,
+    config: Config,
     model: Model,
     closing: bool,
     menu_active: bool,
@@ -39,38 +37,24 @@ impl Client {
             .with_vsync(false);
         let display = glium::Display::new(window, context, &events_loop).unwrap();
 
-        let mut controls = Default::default();
-
-        match File::open("client_conf.toml") {
-            Ok(mut config_file) => {
-                let mut config_string = String::new();
-                match config_file.read_to_string(&mut config_string)  {
-                    Ok(_) => {
-                        match config_string.parse::<Value>() {
-                            Ok(config_value) => {
-                                if let Some(controls_value) = config_value.get("controls") {
-                                    match controls::Controls::from_toml(controls_value) {
-                                        Ok(c) => controls = c,
-                                        Err(err) => println!("{:?}", err),
-                                    }
-                                }
-                                // TODO extract more config values
-                            },
-                            Err(err) => println!("{:?}", err)
-                        }
-                    },
-                    Err(err) => println!("{:?}", err)
+        let config = match Config::load() {
+            Ok(c) => c,
+            Err(err) => {
+                println!("Error while loading config: {}", err);
+                let c = Config::default();
+                if let Err(err) = c.save() {
+                    println!("Error while saving config: {}", err);
                 }
-            },
-            Err(err) => println!("{:?}", err)
-        }
+                c
+            }
+        };
 
         Client {
             events_loop,
             server_interface: Box::new(LocalServerInterface::new()),
             graphics: graphics::Graphics::new(&display),
             display,
-            controls,
+            config,
             model: Model::new(),
             closing: false,
             menu_active: true,
@@ -154,12 +138,13 @@ impl Client {
                     WE::ReceivedCharacter(_c) => (), // TODO handle chat
                     WE::Focused(false) => self.set_menu(true),
                     WE::KeyboardInput { device_id, input } =>
-                        self.controls.process_keyboard_input_event(device_id, input),
+                        self.config.controls.process_keyboard_input_event(device_id, input),
                     WE::MouseInput { device_id, state, button, modifiers } =>
-                        self.controls.process_mouse_input_event(device_id, state,
+                        self.config.controls.process_mouse_input_event(device_id, state,
                                                                 button, modifiers),
                     WE::MouseWheel {device_id, delta, phase, modifiers} =>
-                        self.controls.process_mouse_wheel_event(device_id, delta, phase, modifiers),
+                        self.config.controls
+                            .process_mouse_wheel_event(device_id, delta, phase, modifiers),
                     // CursorMoved positions have sub-pixel precision,
                     // but cursor is likely displayed at the rounded-down integer position
                     WE::CursorMoved {position: _p, ..} => (), // TODO handle menu cursor
@@ -168,7 +153,7 @@ impl Client {
                 // Device events are received any time independently of the window focus
                 Event::DeviceEvent { device_id, event } =>
                     if let DE::Motion { axis, value } = event {
-                        self.controls.process_motion_event(device_id, axis, value);
+                        self.config.controls.process_motion_event(device_id, axis, value);
                     },
                 Event::Awakened => println!("Event::Awakened"),
                 Event::Suspended(sus) => println!("Event::Suspended({})", sus),
@@ -186,7 +171,7 @@ impl Client {
         let mut yaw_delta = 0.0;
         let mut pitch_delta = 0.0;
         let mut jumping = false;
-        for ie in self.controls.get_events() {
+        for ie in self.config.controls.get_events() {
             match ie {
                 Fire(target) => {
                     match target {
@@ -215,19 +200,19 @@ impl Client {
             ci.set_yaw(old_yaw + yaw_delta);
             ci.set_pitch(old_pitch + pitch_delta);
             ci.jumping = jumping;
-            ci.forward = match self.controls.get_state(MoveForward) {
+            ci.forward = match self.config.controls.get_state(MoveForward) {
                 Active => true,
                 Inactive => false,
             };
-            ci.backward = match self.controls.get_state(MoveBackward) {
+            ci.backward = match self.config.controls.get_state(MoveBackward) {
                 Active => true,
                 Inactive => false,
             };
-            ci.left = match self.controls.get_state(MoveLeft) {
+            ci.left = match self.config.controls.get_state(MoveLeft) {
                 Active => true,
                 Inactive => false,
             };
-            ci.right = match self.controls.get_state(MoveRight) {
+            ci.right = match self.config.controls.get_state(MoveRight) {
                 Active => true,
                 Inactive => false,
             };

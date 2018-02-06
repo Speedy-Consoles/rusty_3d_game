@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use consts::TICK_SPEED;
+use shared::consts::TICK_SPEED;
 use model::Model;
 use model::world::character::CharacterInput;
 
@@ -41,7 +41,8 @@ impl ServerInterface for LocalServerInterface {
             let sec_diff = diff.as_secs() as f64 + diff.subsec_nanos() as f64 * 1e-9;
             self.tick = (sec_diff * TICK_SPEED as f64).floor() as u32;
         }
-        self.next_tick_time = self.start_tick_time + ::consts::tick_length() * (self.tick + 1);
+        self.next_tick_time = self.start_tick_time
+            + ::shared::consts::tick_length() * (self.tick + 1);
         model.set_character_input(input);
     }
 

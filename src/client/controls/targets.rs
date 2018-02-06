@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use super::ParseError;
+use shared::ConfigParseError;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, EnumString)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ToString, EnumString)]
 pub enum FireTarget {
     Jump,
     NextWeapon,
@@ -11,7 +11,7 @@ pub enum FireTarget {
     ToggleMenu,
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, EnumString)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, ToString, EnumString)]
 pub enum SwitchTarget {
     MoveRight,
     MoveLeft,
@@ -21,7 +21,7 @@ pub enum SwitchTarget {
     Aim,
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, EnumString)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, ToString, EnumString, EnumIter)]
 pub enum ValueTarget {
     Yaw,
     Pitch,
@@ -45,7 +45,7 @@ pub enum Target {
 }
 
 impl FromStr for Target {
-    type Err = ParseError;
+    type Err = ConfigParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use self::Target::*;
         if let Ok(target) = s.parse::<FireTarget>() {
@@ -55,7 +55,7 @@ impl FromStr for Target {
         } else if let Ok(target) = s.parse::<ValueTarget>() {
             Ok(Value(target))
         } else {
-            Err(ParseError(format!("Unknown target '{}'!", s)))
+            Err(ConfigParseError(format!("Unknown target '{}'!", s)))
         }
     }
 }

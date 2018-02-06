@@ -5,7 +5,7 @@ use super::NumCast;
 use super::glutin::VirtualKeyCode;
 use super::glutin::MouseButton;
 
-use super::ParseError;
+use shared::ConfigParseError;
 use super::MouseWheelDirection;
 
 #[derive(Debug)]
@@ -15,7 +15,7 @@ pub enum FireTrigger {
 }
 
 impl FireTrigger {
-    pub fn from_toml(value: &toml::value::Value) -> Result<FireTrigger, ParseError> {
+    pub fn from_toml(value: &toml::value::Value) -> Result<FireTrigger, ConfigParseError> {
         use self::toml::value::Value::*;
         use self::FireTrigger::*;
         use self::MouseWheelDirection::*;
@@ -27,10 +27,22 @@ impl FireTrigger {
                 &String(ref s) => match s.as_ref() {
                     "MouseWheelUp" => Ok(MouseWheelTick(Up)),
                     "MouseWheelDown" => Ok(MouseWheelTick(Down)),
-                    _ => Err(ParseError(format!("Unknown fire trigger: '{}'", s))),
+                    _ => Err(ConfigParseError(format!("Unknown fire trigger: '{}'", s))),
                 }
-                _ => Err(ParseError(format!("Fire trigger must be string, got '{}'!", value))),
+                _ => Err(ConfigParseError(
+                    format!("Fire trigger must be string, got '{}'!", value))),
             }
+        }
+    }
+
+    pub fn to_toml(&self) -> toml::value::Value {
+        use self::FireTrigger::*;
+        use super::MouseWheelDirection::*;
+
+        match self {
+            &Button(trigger) => trigger.to_toml(),
+            &MouseWheelTick(Up) => toml::value::Value::String(String::from("MouseWheelUp")),
+            &MouseWheelTick(Down) => toml::value::Value::String(String::from("MouseWheelDown")),
         }
     }
 }
@@ -43,7 +55,7 @@ pub enum SwitchTrigger {
 }
 
 impl SwitchTrigger {
-    pub fn from_toml(value: &toml::value::Value) -> Result<SwitchTrigger, ParseError> {
+    pub fn from_toml(value: &toml::value::Value) -> Result<SwitchTrigger, ConfigParseError> {
         use super::toml::value::Value::*;
         use super::glutin::MouseButton::*;
         use self::SwitchTrigger::*;
@@ -51,7 +63,7 @@ impl SwitchTrigger {
         match value {
             &Integer(i) => match NumCast::from(i) {
                 Some(sc) => Ok(ScanCode(sc)),
-                None => return Err(ParseError(format!("Invalid scan code: {}", i))),
+                None => return Err(ConfigParseError(format!("Invalid scan code: {}", i))),
             },
             &String(ref s) => {
                 match s.as_ref() {
@@ -62,7 +74,8 @@ impl SwitchTrigger {
                         if ss.starts_with("Mouse") {
                             match ss[5..].parse() {
                                 Ok(i) => Ok(MouseButton(Other(i))),
-                                Err(_) => Err(ParseError(format!("Unknown push button {}", s))),
+                                Err(_) => Err(ConfigParseError(
+                                    format!("Unknown push button {}", s))),
                             }
                         } else {
                             for &(kc, name) in KEY_CODE_PAIRS {
@@ -70,12 +83,33 @@ impl SwitchTrigger {
                                     return Ok(KeyCode(kc));
                                 }
                             }
-                            Err(ParseError(format!("Unknown push button {}", s)))
+                            Err(ConfigParseError(format!("Unknown push button {}", s)))
                         }
                     }
                 }
             }
-            _ => Err(ParseError(format!("Unknown push button {}", *value)))
+            _ => Err(ConfigParseError(format!("Unknown push button {}", *value)))
+        }
+    }
+
+    pub fn to_toml(&self) -> toml::value::Value {
+        use self::SwitchTrigger::*;
+        use super::glutin::MouseButton::*;
+
+        match *self {
+            ScanCode(sc) => toml::value::Value::Integer(sc as i64),
+            KeyCode(kc) => {
+                for &(key_code, name) in KEY_CODE_PAIRS {
+                    if key_code == kc {
+                        return toml::value::Value::String(String::from(name));
+                    }
+                }
+                toml::value::Value::String(String::new()) // should not happen
+            },
+            MouseButton(Left) => toml::value::Value::String(String::from("MouseLeft")),
+            MouseButton(Right) => toml::value::Value::String(String::from("MouseRight")),
+            MouseButton(Middle) => toml::value::Value::String(String::from("MouseMiddle")),
+            MouseButton(Other(number)) => toml::value::Value::String(format!("Mouse{}", number)),
         }
     }
 }
@@ -89,20 +123,31 @@ pub enum ValueTrigger {
 }
 
 impl ValueTrigger {
-    pub fn from_toml(value: &toml::value::Value) -> Result<ValueTrigger, ParseError> {
+    pub fn from_toml(value: &toml::value::Value) -> Result<ValueTrigger, ConfigParseError> {
         use self::toml::value::Value::*;
         use self::ValueTrigger::*;
 
         match value {
             &Integer(i) => match NumCast::from(i) {
                 Some(axis) => Ok(Axis(axis)),
-                None => return Err(ParseError(format!("Invalid axis id: {}", i))),
+                None => return Err(ConfigParseError(format!("Invalid axis id: {}", i))),
             },
             &String(ref s) => match s.as_ref() {
                 "MouseWheel" => Ok(MouseWheel),
-                _ => Err(ParseError(format!("Unknown axis: '{}'", s))),
+                _ => Err(ConfigParseError(format!("Unknown axis: '{}'", s))),
             }
-            v => Err(ParseError(format!("'axis' must be integer or string, got '{}'!", v))),
+            v => Err(ConfigParseError(format!("'axis' must be integer or string, got '{}'!", v))),
+        }
+    }
+
+    pub fn to_toml(&self) -> toml::value::Value {
+        use self::ValueTrigger::*;
+
+        match *self {
+            MouseX => toml::value::Value::String(String::from("MouseX")),
+            MouseY => toml::value::Value::String(String::from("MouseY")),
+            MouseWheel => toml::value::Value::String(String::from("MouseWheel")),
+            Axis(a) => toml::value::Value::Integer(a as i64),
         }
     }
 }

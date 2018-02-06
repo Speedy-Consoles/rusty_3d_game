@@ -166,7 +166,7 @@ impl Graphics {
     }
 
     pub fn set_view_port(&mut self, width: u64, height: u64) {
-        use consts::Y_FOV;
+        use shared::consts::Y_FOV;
         self.build_perspective_matrix(width as f64 / height as f64, Y_FOV);
     }
 
@@ -174,9 +174,9 @@ impl Graphics {
         use std::f32::consts::PI;
         use self::cgmath::PerspectiveFov;
         use self::cgmath::Rad;
-        use consts::OPTIMAL_SCREEN_RATIO;
-        use consts::Z_NEAR;
-        use consts::Z_FAR;
+        use shared::consts::OPTIMAL_SCREEN_RATIO;
+        use shared::consts::Z_NEAR;
+        use shared::consts::Z_FAR;
 
         // perspective
         if screen_ratio >= OPTIMAL_SCREEN_RATIO {
