@@ -1,0 +1,13 @@
+[package]
+name = "client"
+version = "0.1.0"
+authors = ["Speedy Consoles <rubihome@gmx.de>"]
+
+[dependencies]
+shared = { path = "../shared" }
+glium = "0.20.0"
+cgmath = "0.16.0"
+toml = "0.4.5"
+strum = "0.8.0"
+strum_macros = "0.8.0"
+num = "0.1.41"

@@ -1,4 +1,5 @@
 pub mod consts;
+pub mod model;
 
 extern crate toml;
 
@@ -25,3 +26,4 @@ impl From<toml::de::Error> for ConfigParseError {
         ConfigParseError(err.to_string())
     }
 }
+

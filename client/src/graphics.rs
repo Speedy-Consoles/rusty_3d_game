@@ -1,10 +1,8 @@
-extern crate cgmath;
+use glium;
+use glium::backend::glutin::Display;
+use cgmath::Matrix4;
 
-use super::glium;
-use super::glium::backend::glutin::Display;
-use self::cgmath::Matrix4;
-
-use model::world::World;
+use shared::model::world::World;
 
 #[derive(Copy, Clone)]
 struct MyVertex {
@@ -23,7 +21,7 @@ pub struct Graphics {
 
 impl Graphics {
     pub fn new(display: &Display) -> Graphics {
-        use self::cgmath::SquareMatrix;
+        use cgmath::SquareMatrix;
 
         // program
         let program = glium::Program::from_source(
@@ -79,15 +77,15 @@ impl Graphics {
     }
 
     pub fn draw(&mut self, world: &World, display: &Display) {
-        use self::glium::Surface;
-        use self::glium::draw_parameters;
-        use self::glium::vertex::EmptyVertexAttributes;
-        use self::glium::index::NoIndices;
+        use glium::Surface;
+        use glium::draw_parameters;
+        use glium::vertex::EmptyVertexAttributes;
+        use glium::index::NoIndices;
 
-        use self::cgmath::Rad;
-        use self::cgmath::Matrix4;
-        use self::cgmath::Vector3;
-        use self::cgmath::SquareMatrix;
+        use cgmath::Rad;
+        use cgmath::Matrix4;
+        use cgmath::Vector3;
+        use cgmath::SquareMatrix;
 
         // world cs to character cs
         let cp = world.get_character().get_pos();
@@ -172,8 +170,8 @@ impl Graphics {
 
     fn build_perspective_matrix(&mut self, screen_ratio: f64, mut y_fov: f64) {
         use std::f32::consts::PI;
-        use self::cgmath::PerspectiveFov;
-        use self::cgmath::Rad;
+        use cgmath::PerspectiveFov;
+        use cgmath::Rad;
         use shared::consts::OPTIMAL_SCREEN_RATIO;
         use shared::consts::Z_NEAR;
         use shared::consts::Z_FAR;

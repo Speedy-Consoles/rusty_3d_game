@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use shared::consts::TICK_SPEED;
-use model::Model;
-use model::world::character::CharacterInput;
+use shared::model::Model;
+use shared::model::world::character::CharacterInput;
 
 pub trait ServerInterface {
     fn tick(&mut self, &mut Model, input: CharacterInput);

@@ -1,6 +1,6 @@
 use std::convert::AsRef;
 
-use super::toml;
+use toml;
 use super::NumCast;
 use super::glutin::VirtualKeyCode;
 use super::glutin::MouseButton;
@@ -16,7 +16,7 @@ pub enum FireTrigger {
 
 impl FireTrigger {
     pub fn from_toml(value: &toml::value::Value) -> Result<FireTrigger, ConfigParseError> {
-        use self::toml::value::Value::*;
+        use toml::value::Value::*;
         use self::FireTrigger::*;
         use self::MouseWheelDirection::*;
 
@@ -56,7 +56,7 @@ pub enum SwitchTrigger {
 
 impl SwitchTrigger {
     pub fn from_toml(value: &toml::value::Value) -> Result<SwitchTrigger, ConfigParseError> {
-        use super::toml::value::Value::*;
+        use toml::value::Value::*;
         use super::glutin::MouseButton::*;
         use self::SwitchTrigger::*;
 
@@ -124,7 +124,7 @@ pub enum ValueTrigger {
 
 impl ValueTrigger {
     pub fn from_toml(value: &toml::value::Value) -> Result<ValueTrigger, ConfigParseError> {
-        use self::toml::value::Value::*;
+        use toml::value::Value::*;
         use self::ValueTrigger::*;
 
         match value {

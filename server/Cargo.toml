@@ -1,0 +1,7 @@
+[package]
+name = "server"
+version = "0.1.0"
+authors = ["Speedy Consoles <rubihome@gmx.de>"]
+
+[dependencies]
+shared = { path = "../shared" }

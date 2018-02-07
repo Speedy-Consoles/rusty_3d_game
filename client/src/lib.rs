@@ -1,5 +1,13 @@
+#[macro_use]
 extern crate glium;
+extern crate cgmath;
 extern crate toml;
+extern crate strum;
+extern crate num;
+#[macro_use]
+extern crate strum_macros;
+
+extern crate shared;
 
 mod graphics;
 mod controls;
@@ -12,8 +20,8 @@ use self::glium::backend::glutin::Display;
 use self::server_interface::ServerInterface;
 use self::server_interface::LocalServerInterface;
 use self::config::Config;
-use model::Model;
-use model::world::character::CharacterInput;
+use shared::model::Model;
+use shared::model::world::character::CharacterInput;
 
 pub struct Client {
     events_loop: glutin::EventsLoop,
@@ -192,7 +200,7 @@ impl Client {
                 _ => (),
             }
         }
-        // TODO maybe we shouldn't take these values from the model
+        // TODO maybe we shouldn't take these values from the shared.model
         let old_yaw = self.model.get_world().get_character().get_yaw();
         let old_pitch = self.model.get_world().get_character().get_pitch();
         let mut ci = CharacterInput::default();

@@ -1,2 +1,6 @@
 /target/
 **/*.rs.bk
+/.idea/
+*.iml
+/client/client_conf.toml
+/server/server_conf.toml

@@ -1,8 +1,6 @@
 mod targets;
 mod triggers;
 
-extern crate num;
-
 use std;
 use std::collections::VecDeque;
 use std::collections::HashMap;
@@ -10,10 +8,10 @@ use std::collections::BTreeSet;
 use std::collections::BTreeMap;
 use std::string::ToString;
 
-use self::num::cast::NumCast;
+use toml;
+use num::cast::NumCast;
 use strum::IntoEnumIterator;
-use super::toml;
-use super::glium::glutin;
+use glium::glutin;
 use self::glutin::ElementState;
 use self::glutin::VirtualKeyCode;
 use self::glutin::MouseScrollDelta;
@@ -94,8 +92,8 @@ impl Controls {
 
     pub fn from_toml(value: &toml::value::Value) -> Result<Controls, ConfigParseError> {
         use self::Bind::*;
-        use self::toml::value::Value::Table;
-        use self::toml::value::Value::Float;
+        use toml::value::Value::Table;
+        use toml::value::Value::Float;
 
         let mut controls = Controls::new();
         let table = match value {
@@ -144,8 +142,8 @@ impl Controls {
         use self::FireTrigger::*;
         use self::ValueTrigger::*;
         use self::MouseWheelDirection::*;
-        use self::toml::value::Value::Table;
-        use self::toml::value::Value::Float;
+        use toml::value::Value::Table;
+        use toml::value::Value::Float;
 
         let mut binds = BTreeMap::new();
         for (&trigger, mapping) in self.switch_trigger_mappings.iter() {
