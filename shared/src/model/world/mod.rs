@@ -1,7 +1,7 @@
 pub mod character;
 
 use self::character::Character;
-use self::character::CharacterInput as CharacterInput;
+use self::character::CharacterInput;
 
 pub struct World {
     character: Character,

@@ -30,6 +30,7 @@ pub enum ValueTarget {
 impl ValueTarget {
     pub fn get_base_factor(&self) -> f64 {
         use self::ValueTarget::*;
+
         match *self {
             Yaw => -1.0,
             Pitch => -1.0,
@@ -48,6 +49,7 @@ impl FromStr for Target {
     type Err = ConfigParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use self::Target::*;
+
         if let Ok(target) = s.parse::<FireTarget>() {
             Ok(Fire(target))
         } else if let Ok(target) = s.parse::<SwitchTarget>() {

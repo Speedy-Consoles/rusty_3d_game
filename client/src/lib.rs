@@ -1,27 +1,30 @@
-#[macro_use]
-extern crate glium;
-extern crate cgmath;
-extern crate toml;
-extern crate strum;
-extern crate num;
-#[macro_use]
-extern crate strum_macros;
-
-extern crate shared;
-
 mod graphics;
 mod controls;
 mod config;
 mod server_interface;
 
-use self::glium::glutin;
-use self::glium::backend::glutin::Display;
+#[macro_use]
+extern crate glium;
+extern crate cgmath;
+extern crate toml;
+extern crate num;
+extern crate strum;
+#[macro_use]
+extern crate strum_macros;
 
-use self::server_interface::ServerInterface;
-use self::server_interface::LocalServerInterface;
-use self::config::Config;
+extern crate shared;
+
+use std::time::Instant;
+use std::thread;
+
+use glium::glutin;
+use glium::backend::glutin::Display;
+
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
+use server_interface::ServerInterface;
+use server_interface::LocalServerInterface;
+use config::Config;
 
 pub struct Client {
     events_loop: glutin::EventsLoop,
@@ -71,9 +74,6 @@ impl Client {
     }
 
     pub fn run(&mut self) {
-        use std::time::Instant;
-        use std::thread;
-
         // main loop
         while !self.closing {
             self.handle_events();
@@ -127,7 +127,7 @@ impl Client {
     }
 
     fn handle_events(&mut self) {
-        use self::glutin::Event;
+        use self::glutin::Event::*;
         use self::glutin::WindowEvent as WE;
         use self::glutin::DeviceEvent as DE;
 
@@ -136,7 +136,7 @@ impl Client {
         for ev in events {
             match ev {
                 // Window events are only received if the window has focus
-                Event::WindowEvent { event: wev, .. } => match wev {
+                WindowEvent { event: wev, .. } => match wev {
                     WE::Resized(width, height) =>
                         self.graphics.set_view_port(width as u64, height as u64),
                     WE::Closed => self.closing = true,
@@ -159,22 +159,22 @@ impl Client {
                     _ => (),
                 },
                 // Device events are received any time independently of the window focus
-                Event::DeviceEvent { device_id, event } =>
+                DeviceEvent { device_id, event } =>
                     if let DE::Motion { axis, value } = event {
                         self.config.controls.process_motion_event(device_id, axis, value);
                     },
-                Event::Awakened => println!("Event::Awakened"),
-                Event::Suspended(sus) => println!("Event::Suspended({})", sus),
+                Awakened => println!("Event::Awakened"),
+                Suspended(sus) => println!("Event::Suspended({})", sus),
             }
         };
     }
 
     fn handle_controls(&mut self) -> CharacterInput {
-        use self::controls::FireTarget::*;
-        use self::controls::SwitchTarget::*;
-        use self::controls::ValueTarget::*;
-        use self::controls::ControlEvent::*;
-        use self::controls::SwitchState::*;
+        use controls::FireTarget::*;
+        use controls::SwitchTarget::*;
+        use controls::ValueTarget::*;
+        use controls::ControlEvent::*;
+        use controls::SwitchState::*;
 
         let mut yaw_delta = 0.0;
         let mut pitch_delta = 0.0;

@@ -1,8 +1,25 @@
+use std;
+use std::io::Read;
+use std::f64::consts::PI;
+
 use glium;
 use glium::backend::glutin::Display;
+use glium::Surface;
+use glium::draw_parameters::Depth;
+use glium::draw_parameters::DrawParameters;
+use glium::vertex::EmptyVertexAttributes;
+use glium::index::NoIndices;
 use cgmath::Matrix4;
+use cgmath::Vector3;
+use cgmath::SquareMatrix;
+use cgmath::Rad;
+use cgmath::PerspectiveFov;
 
 use shared::model::world::World;
+use shared::consts::Y_FOV;
+use shared::consts::OPTIMAL_SCREEN_RATIO;
+use shared::consts::Z_NEAR;
+use shared::consts::Z_FAR;
 
 #[derive(Copy, Clone)]
 struct MyVertex {
@@ -21,8 +38,6 @@ pub struct Graphics {
 
 impl Graphics {
     pub fn new(display: &Display) -> Graphics {
-        use cgmath::SquareMatrix;
-
         // program
         let program = glium::Program::from_source(
             display,
@@ -77,16 +92,6 @@ impl Graphics {
     }
 
     pub fn draw(&mut self, world: &World, display: &Display) {
-        use glium::Surface;
-        use glium::draw_parameters;
-        use glium::vertex::EmptyVertexAttributes;
-        use glium::index::NoIndices;
-
-        use cgmath::Rad;
-        use cgmath::Matrix4;
-        use cgmath::Vector3;
-        use cgmath::SquareMatrix;
-
         // world cs to character cs
         let cp = world.get_character().get_pos();
         let character_position = Vector3 {
@@ -121,8 +126,8 @@ impl Graphics {
         let background_uniforms = uniform! { trafo_matrix: screen_to_world_matrix_uniform };
 
         // draw parameters
-        let draw_parameters = draw_parameters::DrawParameters {
-            depth: draw_parameters::Depth {
+        let draw_parameters = DrawParameters {
+            depth: Depth {
                 test: glium::DepthTest::IfLess,
                 write: true,
                 ..Default::default()
@@ -152,9 +157,6 @@ impl Graphics {
     }
 
     fn load_shader_source(file_name: &str) -> String {
-        use std;
-        use std::io::Read;
-
         let file = std::fs::File::open(file_name).expect("Could not load shader source!");
         let mut buffer_reader = std::io::BufReader::new(file);
         let mut shader_source = String::new();
@@ -164,18 +166,10 @@ impl Graphics {
     }
 
     pub fn set_view_port(&mut self, width: u64, height: u64) {
-        use shared::consts::Y_FOV;
         self.build_perspective_matrix(width as f64 / height as f64, Y_FOV);
     }
 
     fn build_perspective_matrix(&mut self, screen_ratio: f64, mut y_fov: f64) {
-        use std::f32::consts::PI;
-        use cgmath::PerspectiveFov;
-        use cgmath::Rad;
-        use shared::consts::OPTIMAL_SCREEN_RATIO;
-        use shared::consts::Z_NEAR;
-        use shared::consts::Z_FAR;
-
         // perspective
         if screen_ratio >= OPTIMAL_SCREEN_RATIO {
             y_fov = ((y_fov / 2.0).tan() * OPTIMAL_SCREEN_RATIO / screen_ratio).atan() * 2.0;
@@ -188,7 +182,7 @@ impl Graphics {
         };
         let projection_matrix: Matrix4<f32> = projection.into();
         self.perspective_matrix = projection_matrix
-            * Matrix4::from_angle_y(Rad(PI / 2.0))
-            * Matrix4::from_angle_x(Rad(-PI / 2.0));
+            * Matrix4::from_angle_y(Rad((PI / 2.0) as f32))
+            * Matrix4::from_angle_x(Rad((-PI / 2.0) as f32));
     }
 }

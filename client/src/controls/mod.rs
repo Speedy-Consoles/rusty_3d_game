@@ -9,16 +9,15 @@ use std::collections::BTreeMap;
 use std::string::ToString;
 
 use toml;
-use num::cast::NumCast;
 use strum::IntoEnumIterator;
 use glium::glutin;
-use self::glutin::ElementState;
-use self::glutin::VirtualKeyCode;
-use self::glutin::MouseScrollDelta;
-use self::glutin::TouchPhase;
-use self::glutin::DeviceId;
-use self::glutin::KeyboardInput;
-use self::glutin::ModifiersState;
+use glium::glutin::ElementState;
+use glium::glutin::VirtualKeyCode;
+use glium::glutin::MouseScrollDelta;
+use glium::glutin::TouchPhase;
+use glium::glutin::DeviceId;
+use glium::glutin::KeyboardInput;
+use glium::glutin::ModifiersState;
 
 use shared::ConfigParseError;
 pub use self::targets::*;
@@ -92,8 +91,8 @@ impl Controls {
 
     pub fn from_toml(value: &toml::value::Value) -> Result<Controls, ConfigParseError> {
         use self::Bind::*;
-        use toml::value::Value::Table;
-        use toml::value::Value::Float;
+        use toml::Value::Table;
+        use toml::Value::Float;
 
         let mut controls = Controls::new();
         let table = match value {
@@ -142,8 +141,8 @@ impl Controls {
         use self::FireTrigger::*;
         use self::ValueTrigger::*;
         use self::MouseWheelDirection::*;
-        use toml::value::Value::Table;
-        use toml::value::Value::Float;
+        use toml::Value::Table;
+        use toml::Value::Float;
 
         let mut binds = BTreeMap::new();
         for (&trigger, mapping) in self.switch_trigger_mappings.iter() {
@@ -221,6 +220,7 @@ impl Controls {
 
     fn set_value_target_trigger(&mut self, trigger: ValueTrigger, target: ValueTarget) {
         use self::ValueTrigger::*;
+
         self.remove_value_target_trigger(target);
         match trigger {
             MouseX => {
@@ -281,6 +281,7 @@ impl Controls {
 
     pub fn get_state(&self, target: SwitchTarget) -> SwitchState {
         use self::SwitchState::*;
+
         match *self.switch_counter.get(&target).unwrap() {
             0 => Inactive,
             _ => Active,
@@ -289,6 +290,7 @@ impl Controls {
 
     pub fn process_motion_event(&mut self, _device_id: DeviceId, axis: u32, mut value: f64) {
         use self::ControlEvent::*;
+
         if let Some(mapping) = self.axis_mappings.get(&axis) {
             for &target in mapping {
                 let factor = self.value_factors.get(&target).unwrap_or(&1.0);

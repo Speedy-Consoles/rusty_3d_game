@@ -1,9 +1,9 @@
 use std::convert::AsRef;
 
 use toml;
-use super::NumCast;
-use super::glutin::VirtualKeyCode;
-use super::glutin::MouseButton;
+use num::NumCast;
+use glium::glutin::VirtualKeyCode;
+use glium::glutin::MouseButton;
 
 use shared::ConfigParseError;
 use super::MouseWheelDirection;
@@ -57,7 +57,7 @@ pub enum SwitchTrigger {
 impl SwitchTrigger {
     pub fn from_toml(value: &toml::value::Value) -> Result<SwitchTrigger, ConfigParseError> {
         use toml::value::Value::*;
-        use super::glutin::MouseButton::*;
+        use self::MouseButton::*;
         use self::SwitchTrigger::*;
 
         match value {
@@ -94,7 +94,7 @@ impl SwitchTrigger {
 
     pub fn to_toml(&self) -> toml::value::Value {
         use self::SwitchTrigger::*;
-        use super::glutin::MouseButton::*;
+        use self::MouseButton::*;
 
         match *self {
             ScanCode(sc) => toml::value::Value::Integer(sc as i64),
@@ -124,7 +124,7 @@ pub enum ValueTrigger {
 
 impl ValueTrigger {
     pub fn from_toml(value: &toml::value::Value) -> Result<ValueTrigger, ConfigParseError> {
-        use toml::value::Value::*;
+        use toml::Value::*;
         use self::ValueTrigger::*;
 
         match value {
@@ -152,7 +152,7 @@ impl ValueTrigger {
     }
 }
 
-use super::glutin::VirtualKeyCode::*;
+use self::VirtualKeyCode::*;
 const KEY_CODE_PAIRS: &'static [(VirtualKeyCode, &'static str)] = &[
     (Key1, "1"),
     (Key2, "2"),
