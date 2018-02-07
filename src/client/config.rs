@@ -17,24 +17,12 @@ impl Config {
     pub fn load() -> Result<Config, ConfigParseError> {
         use self::toml::value;
 
-        match File::open(CLIENT_CONFIG_FILE) {
-            Ok(mut config_file) => {
-                let mut config_string = String::new();
-                match config_file.read_to_string(&mut config_string)  {
-                    Ok(_) => {
-                        match config_string.parse::<value::Value>() {
-                            Ok(config_value) => Config::from_toml(&config_value),
-                            Err(err) => return Err(ConfigParseError(
-                                format!("Could not open config file: {}", err)))
-                        }
-                    },
-                    Err(err) => return Err(ConfigParseError(
-                        format!("Could not read from config file: {}", err)))
-                }
-            },
-            Err(err) => return Err(ConfigParseError(
-                format!("Could not open config file: {}", err)))
-        }
+        let mut config_file = File::open(CLIENT_CONFIG_FILE)?;
+
+        let mut config_string = String::new();
+        config_file.read_to_string(&mut config_string)?;
+        let config_value = config_string.parse::<value::Value>()?;
+        Config::from_toml(&config_value)
     }
 
     pub fn save(&self) -> io::Result<()> {
