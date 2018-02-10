@@ -91,8 +91,7 @@ impl Graphics {
         }
     }
 
-    pub fn draw(&mut self, world: &World, character_yaw: f64,
-                character_pitch: f64, display: &Display) {
+    pub fn draw(&mut self, world: &World, display: &Display) {
         // world cs to character cs
         let cp = world.get_character().get_pos();
         let character_position = Vector3 {
@@ -100,10 +99,9 @@ impl Graphics {
             y: cp.1 as f32,
             z: cp.2 as f32,
         };
-        // take view direction directly and not from model
         let inverse_character_matrix =
-            Matrix4::from_angle_y(Rad(character_pitch as f32))
-            * Matrix4::from_angle_z(Rad(-character_yaw as f32))
+            Matrix4::from_angle_y(Rad(world.get_character().get_pitch() as f32))
+            * Matrix4::from_angle_z(Rad(-world.get_character().get_yaw() as f32))
             * Matrix4::from_translation(-character_position);
 
         // object cs to global cs

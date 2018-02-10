@@ -89,13 +89,17 @@ impl Client {
 
         // main loop
         while !self.closing {
-            // update outside of tick, so we have the new view direction for drawing
-            self.handle_events();
-            self.handle_controls();
-
             // tick
             let now = Instant::now();
             if now >= next_tick_time {
+                self.handle_events();
+                self.handle_controls();
+                let mut character_input = self.character_input;
+                if self.menu_active {
+                    character_input = Default::default();
+                    character_input.add_yaw(self.character_input.get_yaw());
+                    character_input.add_pitch(self.character_input.get_pitch());
+                }
                 self.server_interface.tick(&mut self.model, self.character_input);
                 self.character_input.reset_flags();
                 next_tick_time = self.server_interface.get_next_tick_time();
@@ -110,12 +114,7 @@ impl Client {
             // draw
             let now = Instant::now();
             if now >= next_draw_time {
-                self.graphics.draw(
-                    &self.model.get_world(),
-                    self.character_input.get_yaw(),
-                    self.character_input.get_pitch(),
-                    &self.display
-                );
+                self.graphics.draw(&self.model.get_world(), &self.display);
                 let now = Instant::now();
                 let diff = now - next_draw_time;
                 let sec_diff = diff.as_secs() as f64 + diff.subsec_nanos() as f64 * 1e-9;
@@ -246,7 +245,9 @@ impl Client {
                 }
             }
         }
-        self.character_input.add_yaw(yaw_delta);
-        self.character_input.add_pitch(pitch_delta);
+        if !self.menu_active {
+            self.character_input.add_yaw(yaw_delta);
+            self.character_input.add_pitch(pitch_delta);
+        }
     }
 }
