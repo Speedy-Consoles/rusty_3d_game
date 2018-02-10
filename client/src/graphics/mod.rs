@@ -1,3 +1,5 @@
+pub mod interpolate_world;
+
 use std;
 use std::io::Read;
 use std::f64::consts::PI;
@@ -20,6 +22,7 @@ use shared::consts::Y_FOV;
 use shared::consts::OPTIMAL_SCREEN_RATIO;
 use shared::consts::Z_NEAR;
 use shared::consts::Z_FAR;
+use self::interpolate_world::InterpolateWorld;
 
 #[derive(Copy, Clone)]
 struct MyVertex {
@@ -91,17 +94,21 @@ impl Graphics {
         }
     }
 
-    pub fn draw(&mut self, world: &World, display: &Display) {
+    pub fn draw(&mut self, current_world: &World, prev_world: &InterpolateWorld,
+                intra_tick: f64, display: &Display) {
         // world cs to character cs
-        let cp = world.get_character().get_pos();
+        let inter_world = prev_world.interpolate(current_world, intra_tick);
+        let cp = inter_world.get_character().get_pos();
         let character_position = Vector3 {
             x: cp.0 as f32,
             y: cp.1 as f32,
             z: cp.2 as f32,
         };
+        let yaw = inter_world.get_character().get_yaw();
+        let pitch = inter_world.get_character().get_pitch();
         let inverse_character_matrix =
-            Matrix4::from_angle_y(Rad(world.get_character().get_pitch() as f32))
-            * Matrix4::from_angle_z(Rad(-world.get_character().get_yaw() as f32))
+            Matrix4::from_angle_y(Rad(pitch as f32))
+            * Matrix4::from_angle_z(Rad(-yaw as f32))
             * Matrix4::from_translation(-character_position);
 
         // object cs to global cs

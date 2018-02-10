@@ -33,6 +33,7 @@ impl CharacterInput {
     }
 }
 
+#[derive(Clone)]
 pub struct Character {
     x: f64,
     y: f64,

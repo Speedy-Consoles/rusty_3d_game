@@ -1,4 +1,5 @@
 pub mod consts;
+pub mod util;
 pub mod model;
 
 extern crate toml;

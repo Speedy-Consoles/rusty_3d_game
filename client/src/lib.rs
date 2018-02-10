@@ -22,8 +22,12 @@ use glium::backend::glutin::Display;
 
 use shared::consts;
 use shared::consts::DRAW_SPEED;
+use shared::util;
 use shared::model::Model;
+use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
+use graphics::Graphics;
+use graphics::interpolate_world::InterpolateWorld;
 use server_interface::ServerInterface;
 use server_interface::LocalServerInterface;
 use config::Config;
@@ -31,10 +35,11 @@ use config::Config;
 pub struct Client {
     events_loop: glutin::EventsLoop,
     server_interface: Box<ServerInterface>,
-    graphics: graphics::Graphics,
+    graphics: Graphics,
     display: Display,
     config: Config,
     model: Model,
+    prev_world: InterpolateWorld,
     character_input: CharacterInput,
     closing: bool,
     menu_active: bool,
@@ -66,10 +71,11 @@ impl Client {
         Client {
             events_loop,
             server_interface: Box::new(LocalServerInterface::new()),
-            graphics: graphics::Graphics::new(&display),
+            graphics: Graphics::new(&display),
             display,
             config,
             model: Model::new(),
+            prev_world: InterpolateWorld::from(&World::new()),
             character_input: Default::default(),
             closing: false,
             menu_active: true,
@@ -89,18 +95,21 @@ impl Client {
 
         // main loop
         while !self.closing {
+            // events
+            self.handle_events();
+            self.handle_controls();
+
             // tick
             let now = Instant::now();
             if now >= next_tick_time {
-                self.handle_events();
-                self.handle_controls();
                 let mut character_input = self.character_input;
                 if self.menu_active {
                     character_input = Default::default();
                     character_input.add_yaw(self.character_input.get_yaw());
                     character_input.add_pitch(self.character_input.get_pitch());
                 }
-                self.server_interface.tick(&mut self.model, self.character_input);
+                self.prev_world = self.model.get_world().into();
+                self.server_interface.tick(&mut self.model, character_input);
                 self.character_input.reset_flags();
                 next_tick_time = self.server_interface.get_next_tick_time();
                 tick_counter += 1;
@@ -114,12 +123,18 @@ impl Client {
             // draw
             let now = Instant::now();
             if now >= next_draw_time {
-                self.graphics.draw(&self.model.get_world(), &self.display);
+                self.graphics.draw(
+                    &self.model.get_world(),
+                    &self.prev_world,
+                    self.server_interface.get_intra_tick(),
+                    &self.display
+                );
                 let now = Instant::now();
                 let diff = now - next_draw_time;
                 let sec_diff = diff.as_secs() as f64 + diff.subsec_nanos() as f64 * 1e-9;
-                let whole_draw_diff = (sec_diff * DRAW_SPEED as f64).floor();
-                next_draw_time += consts::draw_interval() * (whole_draw_diff as u32 + 1);
+                let whole_draw_diff = (sec_diff * DRAW_SPEED as f64).floor() as u64;
+                next_draw_time +=
+                    util::mult_duration(&consts::draw_interval(), whole_draw_diff + 1);
                 draw_counter += 1;
             }
 

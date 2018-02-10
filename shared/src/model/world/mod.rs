@@ -3,6 +3,7 @@ pub mod character;
 use self::character::Character;
 use self::character::CharacterInput;
 
+#[derive(Clone)]
 pub struct World {
     character: Character,
 }
