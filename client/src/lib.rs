@@ -20,6 +20,8 @@ use std::thread;
 use glium::glutin;
 use glium::backend::glutin::Display;
 
+use shared::consts;
+use shared::consts::DRAW_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use server_interface::ServerInterface;
@@ -33,6 +35,7 @@ pub struct Client {
     display: Display,
     config: Config,
     model: Model,
+    character_input: CharacterInput,
     closing: bool,
     menu_active: bool,
     cursor_grabbed: bool,
@@ -67,6 +70,7 @@ impl Client {
             display,
             config,
             model: Model::new(),
+            character_input: Default::default(),
             closing: false,
             menu_active: true,
             cursor_grabbed: false,
@@ -74,29 +78,67 @@ impl Client {
     }
 
     pub fn run(&mut self) {
+        // for fps display
+        let mut last_sec = Instant::now();
+        let mut tick_counter = 0;
+        let mut draw_counter = 0;
+
+        // for sleep timing
+        let mut next_draw_time = Instant::now();
+        let mut next_tick_time = Instant::now();
+
         // main loop
         while !self.closing {
+            // update outside of tick, so we have the new view direction for drawing
             self.handle_events();
+            self.handle_controls();
 
-            let character_input = self.handle_controls();
-
-            self.server_interface.tick(&mut self.model, character_input);
-            let next_tick_time = self.server_interface.get_next_tick_time();
-
-            self.model.tick();
+            // tick
+            let now = Instant::now();
+            if now >= next_tick_time {
+                self.server_interface.tick(&mut self.model, self.character_input);
+                self.character_input.reset_flags();
+                next_tick_time = self.server_interface.get_next_tick_time();
+                tick_counter += 1;
+            }
 
             if self.menu_active == self.cursor_grabbed {
                 let menu_active = self.menu_active;
                 self.try_set_cursor_grab(!menu_active);
             }
-            if next_tick_time > Instant::now() {
-                self.graphics.draw(&self.model.get_world(), &self.display);
+
+            // draw
+            let now = Instant::now();
+            if now >= next_draw_time {
+                self.graphics.draw(
+                    &self.model.get_world(),
+                    self.character_input.get_yaw(),
+                    self.character_input.get_pitch(),
+                    &self.display
+                );
+                let now = Instant::now();
+                let diff = now - next_draw_time;
+                let sec_diff = diff.as_secs() as f64 + diff.subsec_nanos() as f64 * 1e-9;
+                let whole_draw_diff = (sec_diff * DRAW_SPEED as f64).floor();
+                next_draw_time += consts::draw_interval() * (whole_draw_diff as u32 + 1);
+                draw_counter += 1;
             }
 
+            // display rates
             let now = Instant::now();
-            if next_tick_time > now {
-                let sleep_duration = next_tick_time - now;
-                thread::sleep(sleep_duration);
+            if now - last_sec > std::time::Duration::from_secs(1) {
+                println!("ticks/s: {}, draws/s: {}", tick_counter, draw_counter);
+                tick_counter = 0;
+                draw_counter = 0;
+                last_sec += std::time::Duration::from_secs(1)
+            }
+
+            // sleep
+            let next_loop_time = next_tick_time.min(next_draw_time);
+            let now = Instant::now();
+            if next_loop_time > now {
+                let sleep_duration = next_loop_time - now;
+                thread::sleep(sleep_duration); // TODO handle network
             }
         }
 
@@ -169,7 +211,7 @@ impl Client {
         };
     }
 
-    fn handle_controls(&mut self) -> CharacterInput {
+    fn handle_controls(&mut self) {
         use controls::FireTarget::*;
         use controls::SwitchTarget::*;
         use controls::ValueTarget::*;
@@ -178,12 +220,11 @@ impl Client {
 
         let mut yaw_delta = 0.0;
         let mut pitch_delta = 0.0;
-        let mut jumping = false;
         for ie in self.config.controls.get_events() {
             match ie {
                 Fire(target) => {
                     match target {
-                        Jump => jumping = true,
+                        Jump => self.character_input.jumping = true,
                         NextWeapon => println!("next weapon"),
                         PrevWeapon => println!("previous weapon"),
                         ToggleMenu => {
@@ -193,41 +234,19 @@ impl Client {
                         Exit => self.closing = true,
                     }
                 },
-                Value {target: Yaw, value} => yaw_delta += value / 1000.0,
-                Value {target: Pitch, value} => pitch_delta += value / 1000.0,
-                Switch { target: Shoot, state: Active } => println!("pew"),
-                Switch { target: Aim, state: Active } => println!("aim"),
-                _ => (),
+                Value { target: Yaw, value } => yaw_delta += value,
+                Value { target: Pitch, value } => pitch_delta += value,
+                Switch { target, state} => match target {
+                    Shoot => if state == Active { println!("pew") },
+                    Aim => if state == Active { println!("aim") },
+                    MoveForward => self.character_input.forward = state == Active,
+                    MoveBackward => self.character_input.backward = state == Active,
+                    MoveLeft => self.character_input.left = state == Active,
+                    MoveRight => self.character_input.right = state == Active,
+                }
             }
         }
-        // TODO maybe we shouldn't take these values from the shared.model
-        let old_yaw = self.model.get_world().get_character().get_yaw();
-        let old_pitch = self.model.get_world().get_character().get_pitch();
-        let mut ci = CharacterInput::default();
-        if !self.menu_active {
-            ci.set_yaw(old_yaw + yaw_delta);
-            ci.set_pitch(old_pitch + pitch_delta);
-            ci.jumping = jumping;
-            ci.forward = match self.config.controls.get_state(MoveForward) {
-                Active => true,
-                Inactive => false,
-            };
-            ci.backward = match self.config.controls.get_state(MoveBackward) {
-                Active => true,
-                Inactive => false,
-            };
-            ci.left = match self.config.controls.get_state(MoveLeft) {
-                Active => true,
-                Inactive => false,
-            };
-            ci.right = match self.config.controls.get_state(MoveRight) {
-                Active => true,
-                Inactive => false,
-            };
-        } else {
-            ci.set_yaw(old_yaw);
-            ci.set_pitch(old_pitch);
-        }
-        ci
+        self.character_input.add_yaw(yaw_delta);
+        self.character_input.add_pitch(pitch_delta);
     }
 }

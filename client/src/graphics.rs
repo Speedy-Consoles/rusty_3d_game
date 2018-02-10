@@ -91,7 +91,8 @@ impl Graphics {
         }
     }
 
-    pub fn draw(&mut self, world: &World, display: &Display) {
+    pub fn draw(&mut self, world: &World, character_yaw: f64,
+                character_pitch: f64, display: &Display) {
         // world cs to character cs
         let cp = world.get_character().get_pos();
         let character_position = Vector3 {
@@ -99,9 +100,10 @@ impl Graphics {
             y: cp.1 as f32,
             z: cp.2 as f32,
         };
+        // take view direction directly and not from model
         let inverse_character_matrix =
-            Matrix4::from_angle_y(Rad(world.get_character().get_pitch() as f32))
-            * Matrix4::from_angle_z(Rad(-world.get_character().get_yaw() as f32))
+            Matrix4::from_angle_y(Rad(character_pitch as f32))
+            * Matrix4::from_angle_z(Rad(-character_yaw as f32))
             * Matrix4::from_translation(-character_position);
 
         // object cs to global cs
@@ -166,12 +168,20 @@ impl Graphics {
     }
 
     pub fn set_view_port(&mut self, width: u64, height: u64) {
-        self.build_perspective_matrix(width as f64 / height as f64, Y_FOV);
+        let ratio = if height != 0 {
+            width as f64 / height as f64
+        } else {
+            0.0
+        };
+        self.build_perspective_matrix(ratio, Y_FOV);
     }
 
-    fn build_perspective_matrix(&mut self, screen_ratio: f64, mut y_fov: f64) {
+    fn build_perspective_matrix(&mut self, mut screen_ratio: f64, mut y_fov: f64) {
+        if screen_ratio <= 0.0 {
+            screen_ratio = OPTIMAL_SCREEN_RATIO;
+        }
         // perspective
-        if screen_ratio >= OPTIMAL_SCREEN_RATIO {
+        if screen_ratio > OPTIMAL_SCREEN_RATIO {
             y_fov = ((y_fov / 2.0).tan() * OPTIMAL_SCREEN_RATIO / screen_ratio).atan() * 2.0;
         }
         let projection = PerspectiveFov {

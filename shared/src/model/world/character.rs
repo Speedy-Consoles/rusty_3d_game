@@ -6,27 +6,29 @@ pub struct CharacterInput {
     pub backward: bool,
     pub right: bool,
     pub left: bool,
-    pub jumping: bool,
+    pub jumping: bool, // TODO consider to make this a counter, so we don't need to reset it
     yaw: f64,
     pitch: f64,
 }
 
 impl CharacterInput {
-    pub fn set_yaw(&mut self, yaw: f64) {
-        self.yaw = (yaw % (PI * 2.0) + (PI * 2.0)) % (PI * 2.0);
+    pub fn add_yaw(&mut self, delta: f64) {
+        self.yaw = ((self.yaw + delta) % (PI * 2.0) + (PI * 2.0)) % (PI * 2.0);
     }
 
-    pub fn set_pitch(&mut self, pitch: f64) {
-        self.pitch = if pitch < -PI / 2.0 {
-            -PI / 2.0
-        } else if pitch > PI / 2.0 {
-            PI / 2.0
-        } else {
-            pitch
-        };
+    pub fn add_pitch(&mut self, delta: f64) {
+        self.pitch = (self.pitch + delta).max(-PI / 2.0).min(PI / 2.0);
     }
 
-    fn reset_triggers(&mut self) {
+    pub fn get_yaw(&self) -> f64 {
+        self.yaw
+    }
+
+    pub fn get_pitch(&self) -> f64 {
+        self.pitch
+    }
+
+    pub fn reset_flags(&mut self) {
         self.jumping = false;
     }
 }
@@ -87,8 +89,5 @@ impl Character {
         }
         self.yaw = self.input.yaw;
         self.pitch = self.input.pitch;
-
-        // reset triggers, so they don't occur again
-        self.input.reset_triggers();
     }
 }
