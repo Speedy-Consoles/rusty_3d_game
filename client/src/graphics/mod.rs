@@ -1,8 +1,9 @@
-pub mod interpolate_world;
+mod interpolate_world;
 
 use std;
 use std::io::Read;
 use std::f64::consts::PI;
+use std::mem;
 
 use glium;
 use glium::backend::glutin::Display;
@@ -22,7 +23,7 @@ use shared::consts::Y_FOV;
 use shared::consts::OPTIMAL_SCREEN_RATIO;
 use shared::consts::Z_NEAR;
 use shared::consts::Z_FAR;
-use self::interpolate_world::InterpolateWorld;
+use self::interpolate_world::VisualWorld;
 
 #[derive(Copy, Clone)]
 struct MyVertex {
@@ -37,6 +38,10 @@ pub struct Graphics {
     program: glium::program::Program,
     background_program: glium::program::Program,
     perspective_matrix: Matrix4<f32>,
+    last_visual_world: VisualWorld,
+    last_tick: u64,
+    current_visual_world: VisualWorld,
+    current_tick: u64,
 }
 
 impl Graphics {
@@ -91,21 +96,36 @@ impl Graphics {
             program,
             background_program,
             perspective_matrix: Matrix4::identity(),
+            current_visual_world: VisualWorld::from(&World::new()),
+            current_tick: 0,
+            last_visual_world: VisualWorld::from(&World::new()),
+            last_tick: 0,
         }
     }
 
-    pub fn draw(&mut self, current_world: &World, prev_world: &InterpolateWorld,
-                intra_tick: f64, display: &Display) {
+    pub fn draw(&mut self, current_world: &World, tick: u64, intra_tick: f64, display: &Display) {
+        if self.current_tick != tick {
+            self.last_tick = self.current_tick;
+            mem::swap(&mut self.last_visual_world, &mut self.current_visual_world);
+        }
+        self.current_tick = tick;
+        self.current_visual_world = VisualWorld::from(current_world);
+
+        let tick_diff = (self.current_tick - self.last_tick) as f64;
+        let inter_visual_world = self.last_visual_world.interpolate(
+            &self.current_visual_world,
+            (tick_diff - 1.0 + intra_tick) / tick_diff
+        );
+
         // world cs to character cs
-        let inter_world = prev_world.interpolate(current_world, intra_tick);
-        let cp = inter_world.get_character().get_pos();
+        let cp = inter_visual_world.get_character().get_pos();
         let character_position = Vector3 {
             x: cp.0 as f32,
             y: cp.1 as f32,
             z: cp.2 as f32,
         };
-        let yaw = inter_world.get_character().get_yaw();
-        let pitch = inter_world.get_character().get_pitch();
+        let yaw = inter_visual_world.get_character().get_yaw();
+        let pitch = inter_visual_world.get_character().get_pitch();
         let inverse_character_matrix =
             Matrix4::from_angle_y(Rad(pitch as f32))
             * Matrix4::from_angle_z(Rad(-yaw as f32))

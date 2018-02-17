@@ -24,10 +24,8 @@ use shared::consts;
 use shared::consts::DRAW_SPEED;
 use shared::util;
 use shared::model::Model;
-use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
 use graphics::Graphics;
-use graphics::interpolate_world::InterpolateWorld;
 use server_interface::ServerInterface;
 use server_interface::LocalServerInterface;
 use config::Config;
@@ -39,7 +37,6 @@ pub struct Client {
     display: Display,
     config: Config,
     model: Model,
-    prev_world: InterpolateWorld,
     character_input: CharacterInput,
     closing: bool,
     menu_active: bool,
@@ -75,7 +72,6 @@ impl Client {
             display,
             config,
             model: Model::new(),
-            prev_world: InterpolateWorld::from(&World::new()),
             character_input: Default::default(),
             closing: false,
             menu_active: true,
@@ -108,7 +104,6 @@ impl Client {
                     character_input.add_yaw(self.character_input.get_yaw());
                     character_input.add_pitch(self.character_input.get_pitch());
                 }
-                self.prev_world = self.model.get_world().into();
                 self.server_interface.tick(&mut self.model, character_input);
                 self.character_input.reset_flags();
                 next_tick_time = self.server_interface.get_next_tick_time();
@@ -125,7 +120,7 @@ impl Client {
             if now >= next_draw_time {
                 self.graphics.draw(
                     &self.model.get_world(),
-                    &self.prev_world,
+                    self.server_interface.get_tick(),
                     self.server_interface.get_intra_tick(),
                     &self.display
                 );
