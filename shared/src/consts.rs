@@ -17,3 +17,4 @@ pub const DRAW_SPEED: u32 = 60; // TODO move to config
 pub fn draw_interval() -> Duration { // TODO move to config, make const
     Duration::from_secs(1) / DRAW_SPEED
 }
+pub const MAX_PREDICT_TICKS: usize = 120;

@@ -12,6 +12,7 @@ pub trait ServerInterface {
     fn get_predicted_tick(&self) -> u64;
     fn get_intra_tick(&self) -> f64;
     fn get_next_tick_time(&self) -> Instant;
+    fn get_character_input(&self, tick: u64) -> Option<CharacterInput>;
 }
 
 pub struct LocalServerInterface {
@@ -43,8 +44,7 @@ impl ServerInterface for LocalServerInterface {
             self.is_first_tick = false;
         } else {
             let diff = now - self.start_tick_time;
-            let sec_diff = diff.as_secs() as f64 + diff.subsec_nanos() as f64 * 1e-9;
-            self.tick = (sec_diff * TICK_SPEED as f64).floor() as u64;
+            self.tick = util::elapsed_ticks(&diff, TICK_SPEED);
         }
         self.next_tick_time = self.start_tick_time
             + util::mult_duration(&consts::tick_interval(), self.tick + 1);
@@ -74,5 +74,9 @@ impl ServerInterface for LocalServerInterface {
 
     fn get_next_tick_time(&self) -> Instant {
         self.next_tick_time
+    }
+
+    fn get_character_input(&self, _tick: u64) -> Option<CharacterInput> {
+        None
     }
 }

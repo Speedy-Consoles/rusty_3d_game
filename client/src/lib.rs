@@ -24,6 +24,7 @@ use shared::consts;
 use shared::consts::DRAW_SPEED;
 use shared::util;
 use shared::model::Model;
+use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
 use graphics::Graphics;
 use server_interface::ServerInterface;
@@ -37,6 +38,7 @@ pub struct Client {
     display: Display,
     config: Config,
     model: Model,
+    predicted_world: World,
     character_input: CharacterInput,
     closing: bool,
     menu_active: bool,
@@ -72,6 +74,7 @@ impl Client {
             display,
             config,
             model: Model::new(),
+            predicted_world: World::new(),
             character_input: Default::default(),
             closing: false,
             menu_active: true,
@@ -106,6 +109,7 @@ impl Client {
                 }
                 self.server_interface.tick(&mut self.model, character_input);
                 self.character_input.reset_flags();
+                self.predict();
                 next_tick_time = self.server_interface.get_next_tick_time();
                 tick_counter += 1;
             }
@@ -120,14 +124,14 @@ impl Client {
             if now >= next_draw_time {
                 self.graphics.draw(
                     &self.model.get_world(),
+                    &self.predicted_world,
                     self.server_interface.get_tick(),
                     self.server_interface.get_intra_tick(),
                     &self.display
                 );
                 let now = Instant::now();
                 let diff = now - next_draw_time;
-                let sec_diff = diff.as_secs() as f64 + diff.subsec_nanos() as f64 * 1e-9;
-                let whole_draw_diff = (sec_diff * DRAW_SPEED as f64).floor() as u64;
+                let whole_draw_diff = util::elapsed_ticks(&diff, DRAW_SPEED);
                 next_draw_time +=
                     util::mult_duration(&consts::draw_interval(), whole_draw_diff + 1);
                 draw_counter += 1;
@@ -174,6 +178,18 @@ impl Client {
         } else {
             self.cursor_grabbed
                 = !self.display.gl_window().set_cursor_state(glutin::CursorState::Normal).is_ok();
+        }
+    }
+
+    fn predict(&mut self) {
+        self.predicted_world = self.model.get_world().clone();
+        let mut input = Default::default();
+        for tick in self.server_interface.get_tick()..self.server_interface.get_predicted_tick() {
+            if let Some(i) = self.server_interface.get_character_input(tick) {
+                input = i;
+            }
+            self.predicted_world.set_character_input(input);
+            self.predicted_world.tick();
         }
     }
 

@@ -103,13 +103,14 @@ impl Graphics {
         }
     }
 
-    pub fn draw(&mut self, current_world: &World, tick: u64, intra_tick: f64, display: &Display) {
+    pub fn draw(&mut self, current_world: &World, predicted_world: &World,
+                tick: u64, intra_tick: f64, display: &Display) {
         if self.current_tick != tick {
             self.last_tick = self.current_tick;
             mem::swap(&mut self.last_visual_world, &mut self.current_visual_world);
         }
         self.current_tick = tick;
-        self.current_visual_world = VisualWorld::from(current_world);
+        self.current_visual_world = VisualWorld::build(current_world, predicted_world);
 
         let tick_diff = (self.current_tick - self.last_tick) as f64;
         let inter_visual_world = self.last_visual_world.interpolate(
