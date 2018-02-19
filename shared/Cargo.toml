@@ -5,3 +5,6 @@ authors = ["Speedy Consoles <rubihome@gmx.de>"]
 
 [dependencies]
 toml = "0.4.5"
+cgmath = "0.16.0"
+newtype_derive = "0.1.6"
+custom_derive = "0.1.7"

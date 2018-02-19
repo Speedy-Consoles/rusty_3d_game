@@ -1,4 +1,7 @@
-use std::f64::consts::PI;
+use math::FixedPoint;
+use math::FPAngle;
+use math::Vec3;
+//use consts::WALKING_SPEED; // TODO
 
 #[derive(Default, Copy, Clone)]
 pub struct CharacterInput {
@@ -7,24 +10,26 @@ pub struct CharacterInput {
     pub right: bool,
     pub left: bool,
     pub jumping: bool, // TODO consider to make this a counter, so we don't need to reset it
-    yaw: f64,
-    pitch: f64,
+    yaw: FPAngle,
+    pitch: FPAngle,
 }
 
 impl CharacterInput {
-    pub fn add_yaw(&mut self, delta: f64) {
-        self.yaw = ((self.yaw + delta) % (PI * 2.0) + (PI * 2.0)) % (PI * 2.0);
+    pub fn add_yaw(&mut self, delta: FPAngle) {
+        let w = FPAngle::whole();
+        self.yaw = ((self.yaw + delta) % w + w) % w;
     }
 
-    pub fn add_pitch(&mut self, delta: f64) {
-        self.pitch = (self.pitch + delta).max(-PI / 2.0).min(PI / 2.0);
+    pub fn add_pitch(&mut self, delta: FPAngle) {
+        let q = FPAngle::quarter();
+        self.pitch = (self.pitch + delta).max(-q).min(q);
     }
 
-    pub fn get_yaw(&self) -> f64 {
+    pub fn get_yaw(&self) -> FPAngle {
         self.yaw
     }
 
-    pub fn get_pitch(&self) -> f64 {
+    pub fn get_pitch(&self) -> FPAngle {
         self.pitch
     }
 
@@ -35,11 +40,9 @@ impl CharacterInput {
 
 #[derive(Clone)]
 pub struct Character {
-    x: f64,
-    y: f64,
-    z: f64,
-    yaw: f64,
-    pitch: f64,
+    pos: Vec3,
+    yaw: FPAngle,
+    pitch: FPAngle,
     input: CharacterInput,
 }
 
@@ -47,11 +50,13 @@ impl Character {
     pub fn new() -> Character {
         Character {
             input: Default::default(),
-            x: 0.0,
-            y: 0.0,
-            z: 0.7,
-            yaw: 0.0,
-            pitch: 0.0,
+            pos: Vec3::new(
+                FixedPoint::new(0),
+                FixedPoint::new(0),
+                FixedPoint::fraction(7, 10)
+            ),
+            yaw: FPAngle::zero(),
+            pitch: FPAngle::zero(),
         }
     }
 
@@ -59,35 +64,48 @@ impl Character {
         self.input = input;
     }
 
-    pub fn get_pos(&self) -> (f64, f64, f64) {
-        (self.x, self.y, self.z)
+    pub fn get_pos(&self) -> Vec3 {
+        self.pos
     }
 
-    pub fn get_yaw(&self) -> f64 {
+    pub fn get_yaw(&self) -> FPAngle {
         self.yaw
     }
 
-    pub fn get_pitch(&self) -> f64 {
+    pub fn get_pitch(&self) -> FPAngle {
         self.pitch
     }
 
     pub fn tick(&mut self) {
+        let mut dir = Vec3::zero();
         if self.input.forward {
-            self.x += self.yaw.cos() * 0.1;
-            self.y += self.yaw.sin() * 0.1;
+            dir.x += 1.into();
         }
         if self.input.backward {
-            self.x -= self.yaw.cos() * 0.1;
-            self.y -= self.yaw.sin() * 0.1;
+            dir.x -= 1.into();
         }
         if self.input.right {
-            self.x += self.yaw.sin() * 0.1;
-            self.y -= self.yaw.cos() * 0.1;
+            dir.y -= 1.into();
         }
         if self.input.left {
-            self.x -= self.yaw.sin() * 0.1;
-            self.y += self.yaw.cos() * 0.1;
+            dir.y += 1.into();
         }
+
+        let ys = self.yaw.sin();
+        let yc = self.yaw.cos();
+        dir = Vec3::new(
+            dir.x * yc - dir.y * ys,
+            dir.x * ys + dir.y * yc,
+            dir.z
+        );
+
+        if !dir.is_zero() {
+            let walking_speed = FixedPoint::fraction(1, 10); // TODO use const in consts instead
+            dir = dir.scale_to(walking_speed.into());
+        }
+
+        self.pos += dir;
+
         self.yaw = self.input.yaw;
         self.pitch = self.input.pitch;
     }

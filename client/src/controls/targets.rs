@@ -32,8 +32,8 @@ impl ValueTarget {
         use self::ValueTarget::*;
 
         match *self {
-            Yaw => -0.001,
-            Pitch => -0.001,
+            Yaw => -0.0002,
+            Pitch => -0.0002,
         }
     }
 }

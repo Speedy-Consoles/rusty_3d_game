@@ -7,7 +7,7 @@ use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 
 pub trait ServerInterface {
-    fn tick(&mut self, &mut Model, input: CharacterInput);
+    fn tick(&mut self, model: &mut Model, input: CharacterInput);
     fn get_tick(&self) -> u64;
     fn get_predicted_tick(&self) -> u64;
     fn get_intra_tick(&self) -> f64;

@@ -1,8 +1,12 @@
 pub mod consts;
+pub mod math;
 pub mod util;
 pub mod model;
 
+#[macro_use] extern crate custom_derive;
+#[macro_use] extern crate newtype_derive;
 extern crate toml;
+extern crate cgmath;
 
 use std::fmt;
 use std::io;

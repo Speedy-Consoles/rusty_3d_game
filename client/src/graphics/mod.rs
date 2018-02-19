@@ -1,4 +1,4 @@
-mod interpolate_world;
+mod visual_world;
 
 use std;
 use std::io::Read;
@@ -23,7 +23,8 @@ use shared::consts::Y_FOV;
 use shared::consts::OPTIMAL_SCREEN_RATIO;
 use shared::consts::Z_NEAR;
 use shared::consts::Z_FAR;
-use self::interpolate_world::VisualWorld;
+use self::visual_world::VisualWorld;
+use self::visual_world::Mix;
 
 #[derive(Copy, Clone)]
 struct MyVertex {
@@ -112,19 +113,14 @@ impl Graphics {
         self.current_tick = tick;
         self.current_visual_world = VisualWorld::build(current_world, predicted_world);
 
-        let tick_diff = (self.current_tick - self.last_tick) as f64;
-        let inter_visual_world = self.last_visual_world.interpolate(
+        let tick_diff = (self.current_tick - self.last_tick) as f32;
+        let inter_visual_world = self.last_visual_world.mix(
             &self.current_visual_world,
-            (tick_diff - 1.0 + intra_tick) / tick_diff
+            (tick_diff - 1.0 + intra_tick as f32) / tick_diff
         );
 
         // world cs to character cs
-        let cp = inter_visual_world.get_character().get_pos();
-        let character_position = Vector3 {
-            x: cp.0 as f32,
-            y: cp.1 as f32,
-            z: cp.2 as f32,
-        };
+        let character_position = inter_visual_world.get_character().get_pos();
         let yaw = inter_visual_world.get_character().get_yaw();
         let pitch = inter_visual_world.get_character().get_pitch();
         let inverse_character_matrix =

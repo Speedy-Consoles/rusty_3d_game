@@ -20,6 +20,7 @@ use std::thread;
 use glium::glutin;
 use glium::backend::glutin::Display;
 
+use shared::math::FPAngle;
 use shared::consts;
 use shared::consts::DRAW_SPEED;
 use shared::util;
@@ -272,8 +273,8 @@ impl Client {
             }
         }
         if !self.menu_active {
-            self.character_input.add_yaw(yaw_delta);
-            self.character_input.add_pitch(pitch_delta);
+            self.character_input.add_yaw(FPAngle::from_tau_float(yaw_delta));
+            self.character_input.add_pitch(FPAngle::from_tau_float(pitch_delta));
         }
     }
 }
