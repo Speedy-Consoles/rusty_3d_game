@@ -1,5 +1,7 @@
 use std::ops::Mul;
+use std::ops::MulAssign;
 use std::ops::Div;
+use std::ops::DivAssign;
 use std::f32::consts::PI as PI32;
 use std::f64::consts::PI as PI64;
 use std::fmt;
@@ -16,11 +18,19 @@ custom_derive! {
 
 impl FixedPoint {
     pub fn new(value: i64) -> FixedPoint {
-        FixedPoint::fraction(value, 1)
+        FixedPoint(value << FP_PRECISION)
+    }
+
+    pub fn zero() -> FixedPoint {
+        FixedPoint(0)
+    }
+
+    pub fn one() -> FixedPoint {
+        FixedPoint(1 << FP_PRECISION)
     }
 
     pub fn fraction(nominator: i64, denominator: i64) -> Self {
-        FixedPoint((nominator << FP_PRECISION) / denominator)
+        FixedPoint((nominator * (1 << FP_PRECISION)) / denominator)
     }
 
     pub fn sqrt(self) -> FixedPoint {
@@ -38,7 +48,13 @@ impl Mul<FixedPoint> for FixedPoint {
     type Output = FixedPoint;
 
     fn mul(self, rhs: FixedPoint) -> FixedPoint {
-        FixedPoint(self.0 * rhs.0 >> FP_PRECISION)
+        FixedPoint(self.0 * rhs.0 / (1 << FP_PRECISION))
+    }
+}
+
+impl MulAssign<FixedPoint> for FixedPoint {
+    fn mul_assign(&mut self, rhs: FixedPoint) {
+        self.0 = self.0 * rhs.0 / (1 << FP_PRECISION);
     }
 }
 
@@ -46,13 +62,19 @@ impl Div<FixedPoint> for FixedPoint {
     type Output = FixedPoint;
 
     fn div(self, rhs: FixedPoint) -> FixedPoint {
-        FixedPoint((self.0 << FP_PRECISION) / rhs.0)
+        FixedPoint((self.0 * (1 << FP_PRECISION)) / rhs.0)
+    }
+}
+
+impl DivAssign<FixedPoint> for FixedPoint {
+    fn div_assign(&mut self, rhs: FixedPoint) {
+        self.0 = (self.0 * (1 << FP_PRECISION)) / rhs.0;
     }
 }
 
 impl From<i64> for FixedPoint {
-    fn from(number: i64) -> Self {
-        FixedPoint(number << FP_PRECISION)
+    fn from(value: i64) -> Self {
+        FixedPoint::new(value)
     }
 }
 
@@ -71,7 +93,7 @@ impl Into<f32> for FixedPoint {
 impl fmt::Display for FixedPoint {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let float: f64 = (*self).into();
-        write!(f, "s{:.*}", (0.3 * FP_PRECISION as f64) as usize, float)
+        write!(f, "s{:.*}", (0.4 * FP_PRECISION as f64) as usize, float)
     }
 }
 

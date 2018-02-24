@@ -4,13 +4,15 @@ use std::ops::Mul;
 use std::ops::Div;
 use std::ops::AddAssign;
 use std::ops::SubAssign;
+use std::ops::MulAssign;
+use std::ops::DivAssign;
 use std::fmt;
 
 use cgmath::Vector3;
 
 use math::fixed_point::FixedPoint;
 
-// TODO rethink this module
+// TODO consider using cgmath's vector struct instead
 
 #[derive(Clone, Copy)]
 pub struct Vec3 {
@@ -41,11 +43,11 @@ impl Vec3 {
     }
 
     pub fn length2(&self) -> FixedPoint {
-        self.x * self.x + self.y * self.y + self.z * self.z
+        self.dot(*self)
     }
 
     pub fn length(&self) -> FixedPoint {
-        (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
+        self.length2().sqrt()
     }
 
     pub fn scale_to(&self, length: FixedPoint) -> Vec3 {
@@ -110,6 +112,14 @@ impl Mul<Vec3> for FixedPoint {
     }
 }
 
+impl MulAssign<FixedPoint> for Vec3 {
+    fn mul_assign(&mut self, rhs: FixedPoint) {
+        self.x *= rhs;
+        self.y *= rhs;
+        self.z *= rhs;
+    }
+}
+
 impl Div<FixedPoint> for Vec3 {
     type Output = Vec3;
 
@@ -119,6 +129,14 @@ impl Div<FixedPoint> for Vec3 {
             y: self.y / rhs,
             z: self.z / rhs,
         }
+    }
+}
+
+impl DivAssign<FixedPoint> for Vec3 {
+    fn div_assign(&mut self, rhs: FixedPoint) {
+        self.x /= rhs;
+        self.y /= rhs;
+        self.z /= rhs;
     }
 }
 

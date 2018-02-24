@@ -12,8 +12,14 @@ pub fn tick_interval() -> Duration { // TODO make const
 }
 
 // physics
-//pub const WALKING_SPEED: FixedPoint = FixedPoint::fraction(1, 100); // TODO
-
+//pub const CHARACTER_HEIGHT: FixedPoint = FixedPoint::fraction(1, 1) // TODO
+//pub const GROUND_ACCELERATION: FixedPoint = FixedPoint::fraction(1, 1); // TODO
+//pub const AIR_ACCELERATION: FixedPoint = FixedPoint::fraction(1, 1); // TODO
+//pub const MAX_WALKING_SPEED: FixedPoint = FixedPoint::fraction(1, 1); // TODO
+//pub const GROUND_FRICTION: FixedPoint = FixedPoint::one()
+//      + GROUND_ACCELERATION / MAX_WALKING_SPEED; // TODO
+//pub const AIR_FRICTION: FixedPoint = FixedPoint::fraction(1, 1); // TODO
+//pub const GRAVITY: FixedPoint = FixedPoint::fraction(1, 1); // TODO
 
 // CLIENT
 

@@ -41,6 +41,7 @@ impl CharacterInput {
 #[derive(Clone)]
 pub struct Character {
     pos: Vec3,
+    vel: Vec3,
     yaw: FPAngle,
     pitch: FPAngle,
     input: CharacterInput,
@@ -48,13 +49,15 @@ pub struct Character {
 
 impl Character {
     pub fn new() -> Character {
+        let character_height = FixedPoint::fraction(17, 10); // TODO use const in consts instead
         Character {
             input: Default::default(),
             pos: Vec3::new(
                 FixedPoint::new(0),
                 FixedPoint::new(0),
-                FixedPoint::fraction(7, 10)
+                character_height,
             ),
+            vel: Vec3::zero(),
             yaw: FPAngle::zero(),
             pitch: FPAngle::zero(),
         }
@@ -77,36 +80,73 @@ impl Character {
     }
 
     pub fn tick(&mut self) {
-        let mut dir = Vec3::zero();
+        let mut input_acceleration = Vec3::zero();
         if self.input.forward {
-            dir.x += 1.into();
+            input_acceleration.x += 1.into();
         }
         if self.input.backward {
-            dir.x -= 1.into();
+            input_acceleration.x -= 1.into();
         }
         if self.input.right {
-            dir.y -= 1.into();
+            input_acceleration.y -= 1.into();
         }
         if self.input.left {
-            dir.y += 1.into();
+            input_acceleration.y += 1.into();
         }
 
         let ys = self.yaw.sin();
         let yc = self.yaw.cos();
-        dir = Vec3::new(
-            dir.x * yc - dir.y * ys,
-            dir.x * ys + dir.y * yc,
-            dir.z
+        input_acceleration = Vec3::new(
+            input_acceleration.x * yc - input_acceleration.y * ys,
+            input_acceleration.x * ys + input_acceleration.y * yc,
+            input_acceleration.z
         );
 
-        if !dir.is_zero() {
-            let walking_speed = FixedPoint::fraction(1, 10); // TODO use const in consts instead
-            dir = dir.scale_to(walking_speed.into());
+        // TODO move these to consts
+        let character_height = FixedPoint::fraction(17, 10);
+        let ground_acceleration = FixedPoint::fraction(1, 20);
+        let air_acceleration = FixedPoint::fraction(1, 200);
+        let max_walking_speed = FixedPoint::fraction(1, 10);
+        let ground_friction = FixedPoint::one() + ground_acceleration / max_walking_speed;
+        let air_friction = FixedPoint::fraction(100, 95);
+        let jump_velocity = FixedPoint::fraction(1, 3);
+        let gravity = FixedPoint::fraction(1, 50);
+
+        if !input_acceleration.is_zero() {
+            input_acceleration = if self.grounded() {
+                input_acceleration.scale_to(ground_acceleration)
+            } else {
+                input_acceleration.scale_to(air_acceleration)
+            };
         }
 
-        self.pos += dir;
+        if self.grounded() && self.input.jumping {
+            input_acceleration.z += jump_velocity;
+        }
 
+        println!("{:?}", input_acceleration);
+
+        self.vel += input_acceleration;
+        self.vel /= if self.grounded() {
+                ground_friction
+            } else {
+                air_friction
+            };
+
+        self.vel.z -= gravity;
+
+        self.pos += self.vel;
         self.yaw = self.input.yaw;
         self.pitch = self.input.pitch;
+
+        if self.pos.z < character_height {
+            self.pos.z = character_height;
+            self.vel.z = FixedPoint::zero();
+        }
+    }
+
+    fn grounded(&self) -> bool {
+        let character_height = FixedPoint::fraction(17, 10); // TODO use const in consts instead
+        self.pos.z == character_height
     }
 }
