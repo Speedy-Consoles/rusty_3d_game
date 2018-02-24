@@ -1,20 +1,14 @@
 use math::FixedPoint;
 use math::FPAngle;
 use math::Vec3;
-//use consts::WALKING_SPEED; // TODO
 
 #[derive(Default, Copy, Clone)]
-pub struct CharacterInput {
-    pub forward: bool,
-    pub backward: bool,
-    pub right: bool,
-    pub left: bool,
-    pub jumping: bool, // TODO consider to make this a counter, so we don't need to reset it
+pub struct ViewDir {
     yaw: FPAngle,
     pitch: FPAngle,
 }
 
-impl CharacterInput {
+impl ViewDir {
     pub fn add_yaw(&mut self, delta: FPAngle) {
         let w = FPAngle::whole();
         self.yaw = ((self.yaw + delta) % w + w) % w;
@@ -32,7 +26,19 @@ impl CharacterInput {
     pub fn get_pitch(&self) -> FPAngle {
         self.pitch
     }
+}
 
+#[derive(Default, Copy, Clone)]
+pub struct CharacterInput {
+    pub forward: bool,
+    pub backward: bool,
+    pub right: bool,
+    pub left: bool,
+    pub jumping: bool, // TODO consider to make this a counter, so we don't need to reset it
+    pub view_dir: ViewDir,
+}
+
+impl CharacterInput {
     pub fn reset_flags(&mut self) {
         self.jumping = false;
     }
@@ -42,8 +48,7 @@ impl CharacterInput {
 pub struct Character {
     pos: Vec3,
     vel: Vec3,
-    yaw: FPAngle,
-    pitch: FPAngle,
+    view_dir: ViewDir,
     input: CharacterInput,
 }
 
@@ -58,8 +63,7 @@ impl Character {
                 character_height,
             ),
             vel: Vec3::zero(),
-            yaw: FPAngle::zero(),
-            pitch: FPAngle::zero(),
+            view_dir: Default::default(),
         }
     }
 
@@ -71,12 +75,8 @@ impl Character {
         self.pos
     }
 
-    pub fn get_yaw(&self) -> FPAngle {
-        self.yaw
-    }
-
-    pub fn get_pitch(&self) -> FPAngle {
-        self.pitch
+    pub fn get_view_dir(&self) -> ViewDir {
+        self.view_dir
     }
 
     pub fn tick(&mut self) {
@@ -94,8 +94,8 @@ impl Character {
             input_acceleration.y += 1.into();
         }
 
-        let ys = self.yaw.sin();
-        let yc = self.yaw.cos();
+        let ys = self.view_dir.yaw.sin();
+        let yc = self.view_dir.yaw.cos();
         input_acceleration = Vec3::new(
             input_acceleration.x * yc - input_acceleration.y * ys,
             input_acceleration.x * ys + input_acceleration.y * yc,
@@ -104,13 +104,13 @@ impl Character {
 
         // TODO move these to consts
         let character_height = FixedPoint::fraction(17, 10);
-        let ground_acceleration = FixedPoint::fraction(1, 20);
-        let air_acceleration = FixedPoint::fraction(1, 600);
-        let max_walking_speed = FixedPoint::fraction(1, 10);
+        let ground_acceleration = FixedPoint::fraction(1, 80);
+        let air_acceleration = FixedPoint::fraction(1, 2400);
+        let max_walking_speed = FixedPoint::fraction(1, 20);
         let ground_friction = FixedPoint::one() + ground_acceleration / max_walking_speed;
-        let air_friction = FixedPoint::fraction(100, 98);
-        let jump_velocity = FixedPoint::fraction(1, 10);
-        let gravity = FixedPoint::fraction(1, 360);
+        let air_friction = FixedPoint::fraction(100, 99);
+        let jump_velocity = FixedPoint::fraction(1, 20);
+        let gravity = FixedPoint::fraction(1, 1440);
 
         if !input_acceleration.is_zero() {
             input_acceleration = if self.grounded() {
@@ -125,17 +125,15 @@ impl Character {
         }
 
         self.vel += input_acceleration;
+        self.vel.z -= gravity;
         self.vel /= if self.grounded() {
                 ground_friction
             } else {
                 air_friction
             };
 
-        self.vel.z -= gravity;
-
         self.pos += self.vel;
-        self.yaw = self.input.yaw;
-        self.pitch = self.input.pitch;
+        self.view_dir = self.input.view_dir;
 
         if self.pos.z < character_height {
             self.pos.z = character_height;

@@ -19,6 +19,7 @@ use cgmath::Rad;
 use cgmath::PerspectiveFov;
 
 use shared::model::world::World;
+use shared::model::world::character::ViewDir;
 use shared::consts::Y_FOV;
 use shared::consts::OPTIMAL_SCREEN_RATIO;
 use shared::consts::Z_NEAR;
@@ -105,7 +106,7 @@ impl Graphics {
     }
 
     pub fn draw(&mut self, current_world: &World, predicted_world: &World,
-                tick: u64, intra_tick: f64, display: &Display) {
+                view_dir: Option<ViewDir>, tick: u64, intra_tick: f64, display: &Display) {
         if self.current_tick != tick {
             self.last_tick = self.current_tick;
             mem::swap(&mut self.last_visual_world, &mut self.current_visual_world);
@@ -119,14 +120,21 @@ impl Graphics {
             (tick_diff - 1.0 + intra_tick as f32) / tick_diff
         );
 
+        let character = inter_visual_world.get_character();
+        let mut yaw = character.get_yaw();
+        let mut pitch = character.get_pitch();
+
+        // overwrite with direct camera
+        if let Some(vd) = view_dir {
+            yaw = vd.get_yaw().rad();
+            pitch = vd.get_pitch().rad();
+        }
+
         // world cs to character cs
-        let character_position = inter_visual_world.get_character().get_pos();
-        let yaw = inter_visual_world.get_character().get_yaw();
-        let pitch = inter_visual_world.get_character().get_pitch();
         let inverse_character_matrix =
             Matrix4::from_angle_y(Rad(pitch as f32))
             * Matrix4::from_angle_z(Rad(-yaw as f32))
-            * Matrix4::from_translation(-character_position);
+            * Matrix4::from_translation(-character.get_pos());
 
         // object cs to global cs
         let object_position = Vector3 {

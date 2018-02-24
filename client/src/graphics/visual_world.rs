@@ -70,8 +70,8 @@ pub struct VisualWorld {
 impl VisualWorld {
     pub fn build(current_world: &World, predicted_world: &World) -> Self {
         let wcp = predicted_world.get_character().get_pos();
-        let wc_yaw = predicted_world.get_character().get_yaw();
-        let wc_pitch = predicted_world.get_character().get_pitch();
+        let wc_yaw = predicted_world.get_character().get_view_dir().get_yaw();
+        let wc_pitch = predicted_world.get_character().get_view_dir().get_pitch();
         let character = VisualCharacter {
             pos: wcp.into(),
             yaw: wc_yaw.rad(),
@@ -100,8 +100,8 @@ impl<'a> From<&'a World> for VisualWorld {
         let c = world.get_character();
         let character = VisualCharacter {
             pos: c.get_pos().into(),
-            yaw: c.get_yaw().rad(),
-            pitch: c.get_pitch().rad(),
+            yaw: c.get_view_dir().get_yaw().rad(),
+            pitch: c.get_view_dir().get_pitch().rad(),
         };
         VisualWorld {
             character

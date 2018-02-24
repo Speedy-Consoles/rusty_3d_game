@@ -105,8 +105,7 @@ impl Client {
                 let mut character_input = self.character_input;
                 if self.menu_active {
                     character_input = Default::default();
-                    character_input.add_yaw(self.character_input.get_yaw());
-                    character_input.add_pitch(self.character_input.get_pitch());
+                    character_input.view_dir = self.character_input.view_dir;
                 }
                 self.server_interface.tick(&mut self.model, character_input);
                 self.character_input.reset_flags();
@@ -123,9 +122,15 @@ impl Client {
             // draw
             let now = Instant::now();
             if now >= next_draw_time {
+                let view_dir = if self.config.direct_camera {
+                    Some(self.character_input.view_dir)
+                } else {
+                    None
+                };
                 self.graphics.draw(
                     &self.model.get_world(),
                     &self.predicted_world,
+                    view_dir,
                     self.server_interface.get_tick(),
                     self.server_interface.get_intra_tick(),
                     &self.display
@@ -273,8 +278,8 @@ impl Client {
             }
         }
         if !self.menu_active {
-            self.character_input.add_yaw(FPAngle::from_tau_float(yaw_delta));
-            self.character_input.add_pitch(FPAngle::from_tau_float(pitch_delta));
+            self.character_input.view_dir.add_yaw(FPAngle::from_tau_float(yaw_delta));
+            self.character_input.view_dir.add_pitch(FPAngle::from_tau_float(pitch_delta));
         }
     }
 }

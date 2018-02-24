@@ -6,7 +6,7 @@ use std::f64::consts::PI;
 // SHARED
 
 // ticks
-pub const TICK_SPEED: u32 = 60;
+pub const TICK_SPEED: u32 = 120;
 pub fn tick_interval() -> Duration { // TODO make const
     Duration::from_secs(1) / TICK_SPEED
 }
