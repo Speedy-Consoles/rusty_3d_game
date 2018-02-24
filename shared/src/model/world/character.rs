@@ -105,12 +105,12 @@ impl Character {
         // TODO move these to consts
         let character_height = FixedPoint::fraction(17, 10);
         let ground_acceleration = FixedPoint::fraction(1, 20);
-        let air_acceleration = FixedPoint::fraction(1, 200);
+        let air_acceleration = FixedPoint::fraction(1, 600);
         let max_walking_speed = FixedPoint::fraction(1, 10);
         let ground_friction = FixedPoint::one() + ground_acceleration / max_walking_speed;
-        let air_friction = FixedPoint::fraction(100, 95);
-        let jump_velocity = FixedPoint::fraction(1, 3);
-        let gravity = FixedPoint::fraction(1, 50);
+        let air_friction = FixedPoint::fraction(100, 98);
+        let jump_velocity = FixedPoint::fraction(1, 10);
+        let gravity = FixedPoint::fraction(1, 360);
 
         if !input_acceleration.is_zero() {
             input_acceleration = if self.grounded() {
@@ -123,8 +123,6 @@ impl Character {
         if self.grounded() && self.input.jumping {
             input_acceleration.z += jump_velocity;
         }
-
-        println!("{:?}", input_acceleration);
 
         self.vel += input_acceleration;
         self.vel /= if self.grounded() {
