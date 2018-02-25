@@ -8,8 +8,18 @@ use std::f32::consts::PI as PI32;
 use std::f64::consts::PI as PI64;
 use std::fmt;
 
+use self::precalc::*;
+
+// fixed-point constants
 const FP_PRECISION: u64 = 16;
-const FP_RESOLUTION: i64 = 1 << FP_PRECISION;
+const FP_RESOLUTION: u64 = 1 << FP_PRECISION;
+
+// trigonometry constants
+const FP_SIN_PRECISION_DIFF: u64 = FP_PRECISION - SIN_PRECISION;
+const SIN_QUARTER_RESOLUTION: u64 = 1 << (SIN_PRECISION - 2);
+const FP_SIN_RESOLUTION_RATIO: u64 = 1 << FP_SIN_PRECISION_DIFF;
+const SIN_QUARTER_MASK: u64 = (!0) % SIN_QUARTER_RESOLUTION;
+const SIN_INTRA_MASK: u64 = (!0) % FP_SIN_RESOLUTION_RATIO;
 
 custom_derive! {
     #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord,
@@ -18,6 +28,8 @@ custom_derive! {
     pub struct FixedPoint(i64);
 }
 
+// number of bits in the fractional part: FP_PRECISION
+// number of bits in the whole part: 64 - 2 * FP_PRECISION
 impl FixedPoint {
     pub fn new(value: i64) -> FixedPoint {
         FixedPoint(value << FP_PRECISION)
@@ -28,11 +40,11 @@ impl FixedPoint {
     }
 
     pub fn one() -> FixedPoint {
-        FixedPoint(FP_RESOLUTION)
+        FixedPoint(FP_RESOLUTION as i64)
     }
 
     pub fn fraction(nominator: i64, denominator: i64) -> Self {
-        FixedPoint((nominator * FP_RESOLUTION) / denominator)
+        FixedPoint((nominator << FP_PRECISION) / denominator)
     }
 
     pub fn sqrt(self) -> FixedPoint {
@@ -46,11 +58,19 @@ impl FixedPoint {
     }
 }
 
+fn fp_mul(a: i64, b: i64) -> i64 {
+    (a * b) >> FP_PRECISION
+}
+
+fn fp_div(a: i64, b: i64) -> i64 {
+    (a << FP_PRECISION) / b
+}
+
 impl Mul<FixedPoint> for FixedPoint {
     type Output = FixedPoint;
 
     fn mul(self, rhs: FixedPoint) -> FixedPoint {
-        FixedPoint(self.0 * rhs.0 / FP_RESOLUTION)
+        FixedPoint(fp_mul(self.0, rhs.0))
     }
 }
 
@@ -64,7 +84,7 @@ impl Mul<i64> for FixedPoint {
 
 impl MulAssign<FixedPoint> for FixedPoint {
     fn mul_assign(&mut self, rhs: FixedPoint) {
-        self.0 = self.0 * rhs.0 / FP_RESOLUTION;
+        self.0 = fp_mul(self.0, rhs.0);
     }
 }
 
@@ -78,7 +98,7 @@ impl Div<FixedPoint> for FixedPoint {
     type Output = FixedPoint;
 
     fn div(self, rhs: FixedPoint) -> FixedPoint {
-        FixedPoint((self.0 * FP_RESOLUTION) / rhs.0)
+        FixedPoint(fp_div(self.0, rhs.0))
     }
 }
 
@@ -92,7 +112,7 @@ impl Div<i64> for FixedPoint {
 
 impl DivAssign<FixedPoint> for FixedPoint {
     fn div_assign(&mut self, rhs: FixedPoint) {
-        self.0 = (self.0 * FP_RESOLUTION) / rhs.0;
+        self.0 = fp_div(self.0, rhs.0);
     }
 }
 
@@ -162,20 +182,20 @@ impl FPAngle {
     }
 
     pub fn sin(&self) -> FixedPoint {
-        const RESOLUTION_RATIO: i64 = FP_RESOLUTION / precalc::SIN_RESOLUTION;
-        let circular = (((self.0).0 % FP_RESOLUTION) + FP_RESOLUTION) % FP_RESOLUTION;
-        let full_index = circular / RESOLUTION_RATIO;
-        let intra = circular % RESOLUTION_RATIO;
-        let quadrant = full_index / precalc::SIN_QUARTER_RESOLUTION;
-        let mut index = full_index as usize % precalc::SIN_QUARTER_RESOLUTION as usize;
+        let circular = (((self.0).0 % FP_RESOLUTION as i64)
+            + FP_RESOLUTION as i64) as u64 % FP_RESOLUTION;
+        let intra = circular & SIN_INTRA_MASK;
+        let quadrant = circular >> (FP_PRECISION - 2);
+        let mut index = ((circular >> FP_SIN_PRECISION_DIFF) & SIN_QUARTER_MASK) as usize;
         let mut next_index = index + 1;
         if quadrant % 2 != 0 {
-            index = precalc::SIN_QUARTER_RESOLUTION as usize - index;
+            index = SIN_QUARTER_RESOLUTION as usize - index;
             next_index = index - 1;
         };
-        let sin1 = precalc::SIN[index];
-        let sin2 = precalc::SIN[next_index];
-        let mut sin = (sin1 * (RESOLUTION_RATIO - intra) + sin2 * intra) / RESOLUTION_RATIO;
+        let sin1 = SIN[index];
+        let sin2 = SIN[next_index];
+        let mut sin = (sin1 * (FP_SIN_RESOLUTION_RATIO - intra) as i64
+            + sin2 * intra as i64) >> FP_SIN_PRECISION_DIFF as i64;
         if quadrant / 2 != 0 {
             sin = -sin
         };

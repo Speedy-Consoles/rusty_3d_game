@@ -1,6 +1,4 @@
 pub const SIN_PRECISION: u64 = 10;
-pub const SIN_QUARTER_RESOLUTION: i64 = 1 << (SIN_PRECISION - 2);
-pub const SIN_RESOLUTION: i64 = 1 << SIN_PRECISION;
 
 pub const SIN: [i64; 257] = [
     0,
