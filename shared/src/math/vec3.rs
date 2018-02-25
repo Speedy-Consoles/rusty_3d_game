@@ -46,17 +46,8 @@ impl Vec3 {
         self.dot(*self)
     }
 
-    pub fn length(&self) -> FixedPoint {
-        self.length2().sqrt()
-    }
-
     pub fn scale_to(&self, length: FixedPoint) -> Vec3 {
-        let my_length = self.length();
-        Vec3 {
-            x: self.x * length / my_length,
-            y: self.y * length / my_length,
-            z: self.z * length / my_length,
-        }
+        *self * length * self.length2().inv_sqrt()
     }
 
     pub fn is_zero(&self) -> bool {

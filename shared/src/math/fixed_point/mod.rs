@@ -47,10 +47,20 @@ impl FixedPoint {
         FixedPoint((nominator << FP_PRECISION) / denominator)
     }
 
-    pub fn sqrt(self) -> FixedPoint {
-        // TODO don't use floats
-        let f: f64 = self.into();
-        FixedPoint((f.sqrt() * FP_RESOLUTION as f64) as i64)
+    pub fn abs(&self) -> FixedPoint {
+        FixedPoint(self.0.abs())
+    }
+
+    pub fn inv_sqrt(self) -> FixedPoint {
+        const THREE: i64 = FP_RESOLUTION as i64 * 3;
+        if self.0 <= 0 {
+            panic!("Attempted to take inverse square root of non-positive number!");
+        }
+        let mut approx = FP_RESOLUTION as i64;
+        for _ in 0..5 { // TODO relate number of iterations to FP_PRECISION
+            approx = fp_mul(approx, THREE - fp_mul(fp_mul(self.0, approx), approx)) >> 1;
+        }
+        FixedPoint(approx)
     }
 
     pub fn is_zero(&self) -> bool {
