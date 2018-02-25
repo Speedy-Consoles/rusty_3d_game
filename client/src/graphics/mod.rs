@@ -126,8 +126,8 @@ impl Graphics {
 
         // overwrite with direct camera
         if let Some(vd) = view_dir {
-            yaw = vd.get_yaw().rad();
-            pitch = vd.get_pitch().rad();
+            yaw = vd.get_yaw().rad_f32();
+            pitch = vd.get_pitch().rad_f32();
         }
 
         // world cs to character cs

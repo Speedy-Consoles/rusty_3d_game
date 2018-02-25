@@ -74,8 +74,8 @@ impl VisualWorld {
         let wc_pitch = predicted_world.get_character().get_view_dir().get_pitch();
         let character = VisualCharacter {
             pos: wcp.into(),
-            yaw: wc_yaw.rad(),
-            pitch: wc_pitch.rad(),
+            yaw: wc_yaw.rad_f32(),
+            pitch: wc_pitch.rad_f32(),
         };
         VisualWorld {
             character
@@ -100,8 +100,8 @@ impl<'a> From<&'a World> for VisualWorld {
         let c = world.get_character();
         let character = VisualCharacter {
             pos: c.get_pos().into(),
-            yaw: c.get_view_dir().get_yaw().rad(),
-            pitch: c.get_view_dir().get_pitch().rad(),
+            yaw: c.get_view_dir().get_yaw().rad_f32(),
+            pitch: c.get_view_dir().get_pitch().rad_f32(),
         };
         VisualWorld {
             character

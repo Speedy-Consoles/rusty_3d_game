@@ -1,3 +1,5 @@
+mod precalc;
+
 use std::ops::Mul;
 use std::ops::MulAssign;
 use std::ops::Div;
@@ -7,7 +9,7 @@ use std::f64::consts::PI as PI64;
 use std::fmt;
 
 const FP_PRECISION: u64 = 16;
-const FP_FACTOR: f64 = (1u64 << FP_PRECISION) as f64;
+const FP_RESOLUTION: i64 = 1 << FP_PRECISION;
 
 custom_derive! {
     #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord,
@@ -26,17 +28,17 @@ impl FixedPoint {
     }
 
     pub fn one() -> FixedPoint {
-        FixedPoint(1 << FP_PRECISION)
+        FixedPoint(FP_RESOLUTION)
     }
 
     pub fn fraction(nominator: i64, denominator: i64) -> Self {
-        FixedPoint((nominator * (1 << FP_PRECISION)) / denominator)
+        FixedPoint((nominator * FP_RESOLUTION) / denominator)
     }
 
     pub fn sqrt(self) -> FixedPoint {
         // TODO don't use floats
         let f: f64 = self.into();
-        FixedPoint((f.sqrt() * FP_FACTOR) as i64)
+        FixedPoint((f.sqrt() * FP_RESOLUTION as f64) as i64)
     }
 
     pub fn is_zero(&self) -> bool {
@@ -48,13 +50,27 @@ impl Mul<FixedPoint> for FixedPoint {
     type Output = FixedPoint;
 
     fn mul(self, rhs: FixedPoint) -> FixedPoint {
-        FixedPoint(self.0 * rhs.0 / (1 << FP_PRECISION))
+        FixedPoint(self.0 * rhs.0 / FP_RESOLUTION)
+    }
+}
+
+impl Mul<i64> for FixedPoint {
+    type Output = FixedPoint;
+
+    fn mul(self, rhs: i64) -> FixedPoint {
+        FixedPoint(self.0 * rhs)
     }
 }
 
 impl MulAssign<FixedPoint> for FixedPoint {
     fn mul_assign(&mut self, rhs: FixedPoint) {
-        self.0 = self.0 * rhs.0 / (1 << FP_PRECISION);
+        self.0 = self.0 * rhs.0 / FP_RESOLUTION;
+    }
+}
+
+impl MulAssign<i64> for FixedPoint {
+    fn mul_assign(&mut self, rhs: i64) {
+        self.0 *= rhs;
     }
 }
 
@@ -62,13 +78,27 @@ impl Div<FixedPoint> for FixedPoint {
     type Output = FixedPoint;
 
     fn div(self, rhs: FixedPoint) -> FixedPoint {
-        FixedPoint((self.0 * (1 << FP_PRECISION)) / rhs.0)
+        FixedPoint((self.0 * FP_RESOLUTION) / rhs.0)
+    }
+}
+
+impl Div<i64> for FixedPoint {
+    type Output = FixedPoint;
+
+    fn div(self, rhs: i64) -> FixedPoint {
+        FixedPoint(self.0 / rhs)
     }
 }
 
 impl DivAssign<FixedPoint> for FixedPoint {
     fn div_assign(&mut self, rhs: FixedPoint) {
-        self.0 = (self.0 * (1 << FP_PRECISION)) / rhs.0;
+        self.0 = (self.0 * FP_RESOLUTION) / rhs.0;
+    }
+}
+
+impl DivAssign<i64> for FixedPoint {
+    fn div_assign(&mut self, rhs: i64) {
+        self.0 /= rhs;
     }
 }
 
@@ -80,13 +110,13 @@ impl From<i64> for FixedPoint {
 
 impl Into<f64> for FixedPoint {
     fn into(self) -> f64 {
-        self.0 as f64 / FP_FACTOR
+        self.0 as f64 / FP_RESOLUTION as f64
     }
 }
 
 impl Into<f32> for FixedPoint {
     fn into(self) -> f32 {
-        self.0 as f32 / FP_FACTOR as f32
+        self.0 as f32 / FP_RESOLUTION as f32
     }
 }
 
@@ -132,24 +162,42 @@ impl FPAngle {
     }
 
     pub fn sin(&self) -> FixedPoint {
-        // TODO don't use floats
-        let f: f64 = self.0.into();
-        FixedPoint(((f * 2.0 * PI64).sin() * FP_FACTOR) as i64)
+        const RESOLUTION_RATIO: i64 = FP_RESOLUTION / precalc::SIN_RESOLUTION;
+        let circular = (((self.0).0 % FP_RESOLUTION) + FP_RESOLUTION) % FP_RESOLUTION;
+        let full_index = circular / RESOLUTION_RATIO;
+        let intra = circular % RESOLUTION_RATIO;
+        let quadrant = full_index / precalc::SIN_QUARTER_RESOLUTION;
+        let mut index = full_index as usize % precalc::SIN_QUARTER_RESOLUTION as usize;
+        let mut next_index = index + 1;
+        if quadrant % 2 != 0 {
+            index = precalc::SIN_QUARTER_RESOLUTION as usize - index;
+            next_index = index - 1;
+        };
+        let sin1 = precalc::SIN[index];
+        let sin2 = precalc::SIN[next_index];
+        let mut sin = (sin1 * (RESOLUTION_RATIO - intra) + sin2 * intra) / RESOLUTION_RATIO;
+        if quadrant / 2 != 0 {
+            sin = -sin
+        };
+        FixedPoint(sin)
     }
 
     pub fn cos(&self) -> FixedPoint {
-        // TODO don't use floats
-        let f: f64 = self.0.into();
-        FixedPoint(((f * 2.0 * PI64).cos() * FP_FACTOR) as i64)
+        (*self + FPAngle::quarter()).sin()
     }
 
     pub fn from_tau_float(float: f64) -> FPAngle {
-        FPAngle(FixedPoint((float * FP_FACTOR) as i64))
+        FPAngle(FixedPoint((float * FP_RESOLUTION as f64) as i64))
     }
 
-    pub fn rad(self) -> f32 {
+    pub fn rad_f32(self) -> f32 {
         let f: f32 = self.0.into();
         f * 2.0 * PI32
+    }
+
+    pub fn rad_f64(self) -> f64 {
+        let f: f64 = self.0.into();
+        f * 2.0 * PI64
     }
 }
 
