@@ -17,6 +17,7 @@ pub enum SwitchTarget {
     MoveLeft,
     MoveForward,
     MoveBackward,
+    Crouch,
     Shoot,
     Aim,
 }

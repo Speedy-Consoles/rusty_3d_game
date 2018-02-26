@@ -274,6 +274,7 @@ impl Client {
                     MoveBackward => self.character_input.backward = state == Active,
                     MoveLeft => self.character_input.left = state == Active,
                     MoveRight => self.character_input.right = state == Active,
+                    Crouch => self.character_input.crouch = state == Active,
                 }
             }
         }

@@ -66,6 +66,14 @@ impl FixedPoint {
     pub fn is_zero(&self) -> bool {
         self.0 == 0
     }
+
+    pub fn is_positive(&self) -> bool {
+        self.0 > 0
+    }
+
+    pub fn mix(self, other: FixedPoint, ratio: FixedPoint) -> FixedPoint {
+        self * (Self::one() - ratio) + other * ratio
+    }
 }
 
 fn fp_mul(a: i64, b: i64) -> i64 {
