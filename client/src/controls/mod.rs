@@ -397,6 +397,7 @@ impl Default for Controls {
             Switch(ScanCode(32), MoveRight),
             Switch(MouseButton(Left), Shoot),
             Switch(MouseButton(Right), Aim),
+            Switch(ScanCode(29), Crouch),
             Fire(Button(ScanCode(57)), Jump),
             Fire(Button(KeyCode(VirtualKeyCode::Q)), Exit),
             Fire(Button(KeyCode(VirtualKeyCode::Escape)), ToggleMenu),

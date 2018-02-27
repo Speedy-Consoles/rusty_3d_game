@@ -89,7 +89,7 @@ impl Character {
     pub fn tick(&mut self) {
         // TODO move these to consts
         let max_expansion = FixedPoint::fraction(2, 10);
-        let min_expansion = FixedPoint::fraction(-7, 10);
+        let min_expansion = FixedPoint::fraction(-8, 10);
         let ground_acceleration = FixedPoint::fraction(1, 80);
         let max_walking_speed = FixedPoint::fraction(1, 20);
         let ground_friction = FixedPoint::one() + ground_acceleration / max_walking_speed;
