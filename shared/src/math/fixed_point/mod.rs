@@ -71,6 +71,10 @@ impl FixedPoint {
         self.0 > 0
     }
 
+    pub fn is_negative(&self) -> bool {
+        self.0 < 0
+    }
+
     pub fn mix(self, other: FixedPoint, ratio: FixedPoint) -> FixedPoint {
         self * (Self::one() - ratio) + other * ratio
     }
