@@ -40,7 +40,7 @@ pub struct CharacterInput {
 }
 
 impl CharacterInput {
-    pub fn reset_flags(&mut self) {
+    pub fn reset_flags(&mut self) { // TODO rethink this
         self.jumping = false;
     }
 }
@@ -188,6 +188,9 @@ impl Character {
 
         // apply view dir
         self.view_dir = self.input.view_dir;
+
+        // reset flags
+        self.input.reset_flags();
     }
 
     fn grounded(&self) -> bool {
