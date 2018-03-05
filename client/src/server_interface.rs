@@ -12,6 +12,7 @@ pub trait ServerInterface {
     fn get_predicted_tick(&self) -> u64;
     fn get_intra_tick(&self) -> f64;
     fn get_next_tick_time(&self) -> Instant;
+    fn get_my_id(&self) -> Option<u64>;
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput>;
 }
 
@@ -20,6 +21,7 @@ pub struct LocalServerInterface {
     tick: u64,
     next_tick_time: Instant,
     is_first_tick: bool,
+    my_id: u64,
 }
 
 impl LocalServerInterface {
@@ -29,6 +31,7 @@ impl LocalServerInterface {
             tick: 0,
             next_tick_time: Instant::now(),
             is_first_tick: true,
+            my_id: 0,
         }
     }
 }
@@ -41,6 +44,7 @@ impl ServerInterface for LocalServerInterface {
             self.start_tick_time = now;
             prev_tick = 0;
             self.tick = 0;
+            self.my_id = model.spawn_character();
             self.is_first_tick = false;
         } else {
             let diff = now - self.start_tick_time;
@@ -51,7 +55,7 @@ impl ServerInterface for LocalServerInterface {
 
         let tick_diff = self.tick - prev_tick;
         for _ in 0..tick_diff {
-            model.set_character_input(input);
+            model.set_character_input(self.my_id, input);
             model.tick();
         }
     }
@@ -74,6 +78,14 @@ impl ServerInterface for LocalServerInterface {
 
     fn get_next_tick_time(&self) -> Instant {
         self.next_tick_time
+    }
+
+    fn get_my_id(&self) -> Option<u64> {
+        if self.is_first_tick {
+            None
+        } else {
+            Some(self.my_id)
+        }
     }
 
     fn get_character_input(&self, _tick: u64) -> Option<CharacterInput> {

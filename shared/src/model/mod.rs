@@ -13,8 +13,12 @@ impl Model {
         }
     }
 
-    pub fn set_character_input(&mut self, input: world::character::CharacterInput) {
-        self.world.set_character_input(input);
+    pub fn set_character_input(&mut self, id: u64, input: world::character::CharacterInput) {
+        self.world.set_character_input(id, input);
+    }
+
+    pub fn spawn_character(&mut self) -> u64 {
+        self.world.spawn_character()
     }
 
     pub fn get_world<'a>(&'a self) -> &'a World {

@@ -1,8 +1,10 @@
 use std::f32::consts::PI;
+use std::collections::HashMap;
 
 use cgmath::Vector3;
 
 use shared::model::world::World;
+use shared::model::world::character::Character;
 
 pub trait Mix {
     fn mix(&self, other: &Self, ratio: f32) -> Self;
@@ -32,6 +34,17 @@ pub struct VisualCharacter {
 }
 
 impl VisualCharacter {
+    pub fn build(character: &Character) -> VisualCharacter {
+        let wcp = character.get_pos();
+        let wc_yaw = character.get_view_dir().get_yaw();
+        let wc_pitch = character.get_view_dir().get_pitch();
+        VisualCharacter {
+            pos: wcp.into(),
+            yaw: wc_yaw.rad_f32(),
+            pitch: wc_pitch.rad_f32(),
+        }
+    }
+
     pub fn get_pos(&self) -> Vector3<f32> {
         self.pos
     }
@@ -64,47 +77,38 @@ impl Mix for VisualCharacter {
 
 #[derive(Clone)]
 pub struct VisualWorld {
-    character: VisualCharacter,
+    characters: HashMap<u64, VisualCharacter>,
 }
 
 impl VisualWorld {
-    pub fn build(current_world: &World, predicted_world: &World) -> Self {
-        let wcp = predicted_world.get_character().get_pos();
-        let wc_yaw = predicted_world.get_character().get_view_dir().get_yaw();
-        let wc_pitch = predicted_world.get_character().get_view_dir().get_pitch();
-        let character = VisualCharacter {
-            pos: wcp.into(),
-            yaw: wc_yaw.rad_f32(),
-            pitch: wc_pitch.rad_f32(),
-        };
+    pub fn new() -> VisualWorld {
         VisualWorld {
-            character
+            characters: HashMap::new(),
         }
     }
 
-    pub fn get_character(&self) -> &VisualCharacter {
-        &self.character
-    }
-}
-
-impl Mix for VisualWorld {
-    fn mix(&self, other: &VisualWorld, ratio: f32) -> Self {
-        VisualWorld {
-            character: self.character.mix(&other.character, ratio)
+    pub fn rebuild(&mut self, my_id: u64, current_world: &World, predicted_world: &World) {
+        self.characters.clear();
+        for (&id, c) in  current_world.get_characters() {
+            if id == my_id {
+                continue;
+            }
+            self.characters.insert(id, VisualCharacter::build(c));
+        }
+        if let Some(c) = predicted_world.get_characters().get(&my_id) {
+            self.characters.insert(my_id, VisualCharacter::build(c));
         }
     }
-}
 
-impl<'a> From<&'a World> for VisualWorld {
-    fn from(world: &World) -> Self {
-        let c = world.get_character();
-        let character = VisualCharacter {
-            pos: c.get_pos().into(),
-            yaw: c.get_view_dir().get_yaw().rad_f32(),
-            pitch: c.get_view_dir().get_pitch().rad_f32(),
-        };
-        VisualWorld {
-            character
+    pub fn get_characters(&self) -> &HashMap<u64, VisualCharacter> {
+        &self.characters
+    }
+
+    pub fn remix(&mut self, a: &VisualWorld, b: &VisualWorld, ratio: f32) {
+        for (id, ca) in a.get_characters() {
+            if let Some(cb) = b.get_characters().get(id) {
+                self.characters.insert(*id, ca.mix(cb, ratio));
+            }
         }
     }
 }

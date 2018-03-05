@@ -25,7 +25,6 @@ use shared::consts::OPTIMAL_SCREEN_RATIO;
 use shared::consts::Z_NEAR;
 use shared::consts::Z_FAR;
 use self::visual_world::VisualWorld;
-use self::visual_world::Mix;
 
 #[derive(Copy, Clone)]
 struct MyVertex {
@@ -44,6 +43,7 @@ pub struct Graphics {
     last_tick: u64,
     current_visual_world: VisualWorld,
     current_tick: u64,
+    mix_world: VisualWorld,
 }
 
 impl Graphics {
@@ -98,29 +98,36 @@ impl Graphics {
             program,
             background_program,
             perspective_matrix: Matrix4::identity(),
-            current_visual_world: VisualWorld::from(&World::new()),
+            current_visual_world: VisualWorld::new(),
             current_tick: 0,
-            last_visual_world: VisualWorld::from(&World::new()),
+            last_visual_world: VisualWorld::new(),
             last_tick: 0,
+            mix_world: VisualWorld::new(),
         }
     }
 
-    pub fn draw(&mut self, current_world: &World, predicted_world: &World,
+    pub fn draw(&mut self, current_world: &World, predicted_world: &World, my_id: u64,
                 view_dir: Option<ViewDir>, tick: u64, intra_tick: f64, display: &Display) {
         if self.current_tick != tick {
             self.last_tick = self.current_tick;
             mem::swap(&mut self.last_visual_world, &mut self.current_visual_world);
         }
         self.current_tick = tick;
-        self.current_visual_world = VisualWorld::build(current_world, predicted_world);
+        self.current_visual_world.rebuild(my_id, current_world, predicted_world);
 
         let tick_diff = (self.current_tick - self.last_tick) as f32;
-        let inter_visual_world = self.last_visual_world.mix(
+        self.mix_world.remix(
             &self.current_visual_world,
+            &self.last_visual_world,
             (tick_diff - 1.0 + intra_tick as f32) / tick_diff
         );
 
-        let character = inter_visual_world.get_character();
+        let character = if let Some(c) = self.current_visual_world.get_characters().get(&my_id) {
+            c
+        } else {
+            return
+        };
+
         let mut yaw = character.get_yaw();
         let mut pitch = character.get_pitch();
 

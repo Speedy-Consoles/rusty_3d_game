@@ -127,14 +127,17 @@ impl Client {
                 } else {
                     None
                 };
-                self.graphics.draw(
-                    &self.model.get_world(),
-                    &self.predicted_world,
-                    view_dir,
-                    self.server_interface.get_tick(),
-                    self.server_interface.get_intra_tick(),
-                    &self.display
-                );
+                if let Some(my_id) = self.server_interface.get_my_id() {
+                    self.graphics.draw(
+                        &self.model.get_world(),
+                        &self.predicted_world,
+                        my_id,
+                        view_dir,
+                        self.server_interface.get_tick(),
+                        self.server_interface.get_intra_tick(),
+                        &self.display
+                    );
+                }
                 let now = Instant::now();
                 let diff = now - next_draw_time;
                 let whole_draw_diff = util::elapsed_ticks(&diff, DRAW_SPEED);
@@ -188,14 +191,16 @@ impl Client {
     }
 
     fn predict(&mut self) {
-        self.predicted_world = self.model.get_world().clone();
-        let mut input = Default::default();
-        for tick in self.server_interface.get_tick()..self.server_interface.get_predicted_tick() {
-            if let Some(i) = self.server_interface.get_character_input(tick) {
-                input = i;
+        if let Some(my_id) = self.server_interface.get_my_id() {
+            self.predicted_world = self.model.get_world().clone();
+            let mut input = Default::default();
+            for tick in self.server_interface.get_tick()..self.server_interface.get_predicted_tick() {
+                if let Some(i) = self.server_interface.get_character_input(tick) {
+                    input = i;
+                }
+                self.predicted_world.set_character_input(my_id, input);
+                self.predicted_world.tick();
             }
-            self.predicted_world.set_character_input(input);
-            self.predicted_world.tick();
         }
     }
 
