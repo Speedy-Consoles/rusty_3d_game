@@ -9,9 +9,10 @@ use std::io::ErrorKind;
 use shared::util;
 use shared::consts;
 use shared::model::Model;
-use shared::net::MAX_MESSAGE_LENGTH;
 use shared::net::ClientMessage;
 use shared::net::ServerMessage;
+use shared::net::Packable;
+use shared::net::MAX_MESSAGE_LENGTH;
 
 pub struct Server {
     socket: UdpSocket,
@@ -98,8 +99,8 @@ impl Server {
 
     fn send_to(&mut self, msg: ServerMessage, dst: SocketAddr) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
-        msg.pack(&mut buf).unwrap();
-        self.socket.send_to(&buf, dst).unwrap();
+        let amount = msg.pack(&mut buf).unwrap();
+        self.socket.send_to(&buf[..amount], dst).unwrap();
     }
 
     fn recv_from(&self) -> Option<(ClientMessage, SocketAddr)> {

@@ -9,6 +9,7 @@ use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::net::ServerMessage;
 use shared::net::ClientMessage;
+use shared::net::Packable;
 use shared::net::MAX_MESSAGE_LENGTH;
 
 use super::ConnectionState;
@@ -42,8 +43,8 @@ impl RemoteServerInterface {
 
     fn send(&mut self, msg: ClientMessage) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
-        msg.pack(&mut buf).unwrap();
-        self.socket.send(&buf).unwrap();
+        let amount = msg.pack(&mut buf).unwrap();
+        self.socket.send(&buf[..amount]).unwrap();
     }
 
     fn recv(&self) -> Option<ServerMessage> {
