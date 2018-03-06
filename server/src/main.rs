@@ -1,5 +1,8 @@
 extern crate server;
 
+use server::Server;
+
 fn main() {
-    println!("Hello server!");
+    let mut server = Server::new();
+    server.run();
 }

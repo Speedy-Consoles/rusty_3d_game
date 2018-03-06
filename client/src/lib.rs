@@ -16,6 +16,7 @@ extern crate shared;
 
 use std::time::Instant;
 use std::thread;
+use std::env;
 
 use glium::glutin;
 use glium::backend::glutin::Display;
@@ -30,6 +31,7 @@ use shared::model::world::character::CharacterInput;
 use graphics::Graphics;
 use server_interface::ServerInterface;
 use server_interface::LocalServerInterface;
+use server_interface::RemoteServerInterface;
 use config::Config;
 
 pub struct Client {
@@ -68,9 +70,18 @@ impl Client {
             }
         };
 
+        let si: Box<ServerInterface> = match env::args().nth(1) {
+            Some(s) => {
+                let mut rsi = RemoteServerInterface::new().unwrap();
+                rsi.connect(s).expect("Couldn't connect to server!");
+                Box::new(rsi)
+            },
+            None => Box::new(LocalServerInterface::new()),
+        };
+
         Client {
             events_loop,
-            server_interface: Box::new(LocalServerInterface::new()),
+            server_interface: si,
             graphics: Graphics::new(&display),
             display,
             config,
