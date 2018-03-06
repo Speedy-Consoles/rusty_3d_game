@@ -39,7 +39,7 @@ impl ServerInterface for LocalServerInterface {
             self.start_tick_time = now;
             prev_tick = 0;
             self.tick = 0;
-            self.my_id = model.spawn_character();
+            self.my_id = model.spawn_character(); // TODO my_id != my_character_id
             self.is_first_tick = false;
         } else {
             let diff = now - self.start_tick_time;

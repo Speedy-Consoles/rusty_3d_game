@@ -25,6 +25,8 @@ impl ClientMessage {
 pub enum ServerMessage {
     ConnectionConfirm(u64),
     EchoResponse(u64),
+    Leave(u64),
+    Kick,
 }
 
 impl ServerMessage {

@@ -133,6 +133,7 @@ impl Client {
             let now = Instant::now();
             if now >= next_draw_time {
                 if let Some(my_id) = self.server_interface.get_my_id() {
+                    // TODO my_id != my_character_id
                     let view_dir = if self.config.direct_camera {
                         Some(self.character_input.view_dir)
                     } else {
@@ -148,11 +149,8 @@ impl Client {
                         &self.display
                     );
                 }
-                let now = Instant::now();
-                let diff = now - next_draw_time;
-                let whole_draw_diff = util::elapsed_ticks(&diff, DRAW_SPEED);
-                next_draw_time +=
-                    util::mult_duration(&consts::draw_interval(), whole_draw_diff + 1);
+                let draw_diff = util::elapsed_ticks(&next_draw_time.elapsed(), DRAW_SPEED);
+                next_draw_time += util::mult_duration(&consts::draw_interval(), draw_diff + 1);
                 draw_counter += 1;
             }
 
