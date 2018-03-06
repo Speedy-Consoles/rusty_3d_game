@@ -9,6 +9,16 @@ use shared::util;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 
+use self::ConnectionState::*;
+
+#[derive(Clone, Copy)]
+pub enum ConnectionState {
+    Connecting,
+    Connected,
+    Disconnecting,
+    Disconnected,
+}
+
 pub trait ServerInterface {
     fn tick(&mut self, model: &mut Model, input: CharacterInput);
     fn get_tick(&self) -> u64;
@@ -17,6 +27,7 @@ pub trait ServerInterface {
     fn get_next_tick_time(&self) -> Instant;
     fn get_my_id(&self) -> Option<u64>;
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput>;
+    fn get_connection_state(&self) -> ConnectionState;
 }
 
 pub struct LocalServerInterface {
@@ -94,16 +105,24 @@ impl ServerInterface for LocalServerInterface {
     fn get_character_input(&self, _tick: u64) -> Option<CharacterInput> {
         None
     }
+
+    fn get_connection_state(&self) -> ConnectionState {
+        Connected
+    }
 }
 
 pub struct RemoteServerInterface {
-    socket: UdpSocket
+    socket: UdpSocket,
+    connection_state: ConnectionState,
 }
 
 impl RemoteServerInterface {
     pub fn new() -> io::Result<RemoteServerInterface> {
         match UdpSocket::bind("0.0.0.0:0") {
-            Ok(socket) => Ok(RemoteServerInterface { socket }),
+            Ok(socket) => Ok(RemoteServerInterface {
+                socket,
+                connection_state: Disconnected,
+            }),
             Err(e) => Err(e),
         }
     }
@@ -154,5 +173,9 @@ impl ServerInterface for RemoteServerInterface {
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput> {
         // TODO
         None
+    }
+
+    fn get_connection_state(&self) -> ConnectionState {
+        self.connection_state
     }
 }
