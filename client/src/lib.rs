@@ -70,11 +70,7 @@ impl Client {
         };
 
         let si: Box<ServerInterface> = match env::args().nth(1) {
-            Some(s) => {
-                let mut rsi = RemoteServerInterface::new().unwrap();
-                rsi.connect(s).expect("Couldn't connect to server!");
-                Box::new(rsi)
-            },
+            Some(addr_string) => Box::new(RemoteServerInterface::new(addr_string).unwrap()),
             None => Box::new(LocalServerInterface::new()),
         };
 
@@ -132,7 +128,7 @@ impl Client {
             // draw
             let now = Instant::now();
             if now >= next_draw_time {
-                if let Some(my_id) = self.server_interface.get_my_id() {
+                if let Some(my_player_id) = self.server_interface.get_my_player_id() {
                     // TODO my_id != my_character_id
                     let view_dir = if self.config.direct_camera {
                         Some(self.character_input.view_dir)
@@ -140,9 +136,9 @@ impl Client {
                         None
                     };
                     self.graphics.draw(
-                        &self.model.get_world(),
+                        &self.model,
                         &self.predicted_world,
-                        my_id,
+                        my_player_id,
                         view_dir,
                         self.server_interface.get_tick(),
                         self.server_interface.get_intra_tick(),
@@ -194,7 +190,7 @@ impl Client {
     }
 
     fn predict(&mut self) {
-        if let Some(my_id) = self.server_interface.get_my_id() {
+        if let Some(my_id) = self.server_interface.get_my_player_id() {
             self.predicted_world = self.model.get_world().clone();
             for tick in self.server_interface.get_tick()..self.server_interface.get_predicted_tick() {
                 if let Some(input) = self.server_interface.get_character_input(tick) {

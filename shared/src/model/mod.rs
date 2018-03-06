@@ -1,24 +1,58 @@
 pub mod world;
+pub mod player;
 
+use std::collections::HashMap;
+
+use self::player::Player;
 use self::world::World;
+use self::world::character::CharacterInput;
+
+// TODO maybe replace ids with weak references?
 
 pub struct Model {
+    players: HashMap<u64, Player>,
     world: world::World,
+    next_player_id: u64,
 }
 
 impl Model {
     pub fn new() -> Model {
         Model {
+            players: HashMap::new(),
             world: world::World::new(),
+            next_player_id: 0,
         }
     }
 
-    pub fn set_character_input(&mut self, id: u64, input: world::character::CharacterInput) {
-        self.world.set_character_input(id, input);
+    pub fn set_character_input(&mut self, player_id: u64, input: CharacterInput) {
+        if let Some(character_id) = self.players.get(&player_id).unwrap().get_character_id() {
+            self.world.set_character_input(character_id, input);
+        }
     }
 
-    pub fn spawn_character(&mut self) -> u64 {
-        self.world.spawn_character()
+    pub fn add_player(&mut self, name: String) -> u64 {
+        let id = self.next_player_id;
+        let character_id = self.world.spawn_character();
+        let mut player = Player::new(name);
+        player.set_character_id(Some(character_id));
+        self.players.insert(id, player);
+        self.next_player_id += 1;
+        id
+    }
+
+    pub fn remove_player(&mut self, player_id: u64) {
+        match self.players.remove(&player_id) {
+            Some(player) => {
+                if let Some(character_id) = player.get_character_id() {
+                    self.world.remove_character(character_id);
+                }
+            },
+            None => println!("WARNING: Tried to remove non-existing player with id {}!", player_id),
+        }
+    }
+
+    pub fn get_player(&self, player_id: u64) -> Option<&Player> {
+        self.players.get(&player_id)
     }
 
     pub fn get_world<'a>(&'a self) -> &'a World {

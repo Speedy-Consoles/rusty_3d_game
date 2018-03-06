@@ -19,8 +19,8 @@ impl World {
         }
     }
 
-    pub fn set_character_input(&mut self, id: u64, input: CharacterInput) {
-        if let Some(c) = self.characters.get_mut(&id) {
+    pub fn set_character_input(&mut self, character_id: u64, input: CharacterInput) {
+        if let Some(c) = self.characters.get_mut(&character_id) {
             c.set_input(input);
         }
     }
@@ -30,6 +30,16 @@ impl World {
         self.characters.insert(self.next_character_id, character);
         self.next_character_id += 1;
         self.next_character_id - 1
+    }
+
+    pub fn remove_character(&mut self, character_id: u64) {
+        if let None = self.characters.remove(&character_id) {
+            println!("WARNING: Tried to remove non-existing character with id {}!", character_id);
+        }
+    }
+
+    pub fn get_character(&self, character_id: u64) -> Option<&Character> {
+        self.characters.get(&character_id)
     }
 
     pub fn get_characters(&self) -> &HashMap<u64, Character> {

@@ -19,26 +19,25 @@ use super::ServerInterface;
 pub struct RemoteServerInterface {
     socket: UdpSocket,
     connection_state: ConnectionState,
-    my_id: Option<u64>,
+    my_player_id: Option<u64>,
 }
 
 impl RemoteServerInterface {
-    pub fn new() -> io::Result<RemoteServerInterface> {
+    pub fn new<A: ToSocketAddrs>(addr: A) -> io::Result<RemoteServerInterface> {
         // let the os decide over port
-        UdpSocket::bind("0.0.0.0:0").map(|socket| {
+        UdpSocket::bind("0.0.0.0:0").and_then(|socket| {
             socket.set_nonblocking(false).unwrap();
-            RemoteServerInterface {
+            if let Err(e) = socket.connect(addr) {
+                return Err(e);
+            }
+            let mut rsi = RemoteServerInterface {
                 socket,
                 connection_state: Disconnected,
-                my_id: None,
-            }
+                my_player_id: None,
+            };
+            rsi.send(ClientMessage::ConnectionRequest);
+            Ok(rsi)
         })
-    }
-
-    pub fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> io::Result<()> {
-        self.socket.connect(addr)?;
-        self.send(ClientMessage::ConnectionRequest);
-        Ok(())
     }
 
     fn send(&mut self, msg: ClientMessage) {
@@ -93,7 +92,7 @@ impl ServerInterface for RemoteServerInterface {
             if let Some(msg) = self.recv() {
                 println!("{:?}", msg);
                 match msg {
-                    ConnectionConfirm(id) => self.my_id = Some(id),
+                    ConnectionConfirm(id) => self.my_player_id = Some(id),
                     _ => (), // TODO
                 }
             }
@@ -120,8 +119,8 @@ impl ServerInterface for RemoteServerInterface {
         Instant::now() + Duration::from_secs(1)
     }
 
-    fn get_my_id(&self) -> Option<u64> {
-        self.my_id
+    fn get_my_player_id(&self) -> Option<u64> {
+        self.my_player_id
     }
 
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput> {

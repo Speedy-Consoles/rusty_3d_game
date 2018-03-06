@@ -39,7 +39,7 @@ impl ServerInterface for LocalServerInterface {
             self.start_tick_time = now;
             prev_tick = 0;
             self.tick = 0;
-            self.my_id = model.spawn_character(); // TODO my_id != my_character_id
+            self.my_id = model.add_player(String::from("Player"));
             self.is_first_tick = false;
         } else {
             let diff = now - self.start_tick_time;
@@ -85,7 +85,7 @@ impl ServerInterface for LocalServerInterface {
         self.next_tick_time
     }
 
-    fn get_my_id(&self) -> Option<u64> {
+    fn get_my_player_id(&self) -> Option<u64> {
         if self.is_first_tick {
             None
         } else {

@@ -18,6 +18,7 @@ use cgmath::SquareMatrix;
 use cgmath::Rad;
 use cgmath::PerspectiveFov;
 
+use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::ViewDir;
 use shared::consts::Y_FOV;
@@ -106,14 +107,17 @@ impl Graphics {
         }
     }
 
-    pub fn draw(&mut self, current_world: &World, predicted_world: &World, my_id: u64,
+    pub fn draw(&mut self, current_model: &Model, predicted_world: &World, my_player_id: u64,
                 view_dir: Option<ViewDir>, tick: u64, intra_tick: f64, display: &Display) {
+        let current_world = current_model.get_world();
+        let my_character_id = current_model.get_player(my_player_id)
+                .and_then(|p| p.get_character_id());
         if self.current_tick != tick {
             self.last_tick = self.current_tick;
             mem::swap(&mut self.last_visual_world, &mut self.current_visual_world);
         }
         self.current_tick = tick;
-        self.current_visual_world.rebuild(my_id, current_world, predicted_world);
+        self.current_visual_world.rebuild(my_character_id, current_world, predicted_world);
 
         let tick_diff = (self.current_tick - self.last_tick) as f32;
         self.mix_world.remix(
@@ -122,7 +126,8 @@ impl Graphics {
             (tick_diff - 1.0 + intra_tick as f32) / tick_diff
         );
 
-        let character = if let Some(c) = self.current_visual_world.get_characters().get(&my_id) {
+        let character = if let Some(c) = my_character_id.and_then(|id|
+                self.current_visual_world.get_character(id)) {
             c
         } else {
             return

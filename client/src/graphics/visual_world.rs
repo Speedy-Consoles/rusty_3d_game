@@ -87,28 +87,37 @@ impl VisualWorld {
         }
     }
 
-    pub fn rebuild(&mut self, my_id: u64, current_world: &World, predicted_world: &World) {
+    pub fn rebuild(&mut self, my_character_id: Option<u64>,
+                   current_world: &World, predicted_world: &World) {
         self.characters.clear();
         for (&id, c) in  current_world.get_characters() {
-            if id == my_id {
+            if Some(id) == my_character_id {
                 continue;
             }
             self.characters.insert(id, VisualCharacter::build(c));
         }
-        if let Some(c) = predicted_world.get_characters().get(&my_id) {
-            self.characters.insert(my_id, VisualCharacter::build(c));
+        if let Some(id) = my_character_id {
+            if let Some(character) = predicted_world.get_character(id) {
+                self.characters.insert(id, VisualCharacter::build(character));
+            }
         }
+    }
+
+    pub fn remix(&mut self, a: &VisualWorld, b: &VisualWorld, ratio: f32) {
+        for (id, cb) in b.get_characters() {
+            if let Some(ca) = a.get_characters().get(id) {
+                self.characters.insert(*id, ca.mix(cb, ratio));
+            } else {
+                self.characters.insert(*id, cb.clone()); // always insert characters of the current world
+            }
+        }
+    }
+
+    pub fn get_character(&self, character_id: u64) -> Option<&VisualCharacter> {
+        self.characters.get(&character_id)
     }
 
     pub fn get_characters(&self) -> &HashMap<u64, VisualCharacter> {
         &self.characters
-    }
-
-    pub fn remix(&mut self, a: &VisualWorld, b: &VisualWorld, ratio: f32) {
-        for (id, ca) in a.get_characters() {
-            if let Some(cb) = b.get_characters().get(id) {
-                self.characters.insert(*id, ca.mix(cb, ratio));
-            }
-        }
     }
 }

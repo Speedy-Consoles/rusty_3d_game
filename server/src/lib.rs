@@ -18,7 +18,6 @@ pub struct Server {
     model: Model,
     client_id_by_addr: HashMap<SocketAddr, u64>,
     client_addr_by_id: HashMap<u64, SocketAddr>,
-    next_id: u64,
 }
 
 impl Server {
@@ -28,7 +27,6 @@ impl Server {
             model: Model::new(),
             client_id_by_addr: HashMap::new(),
             client_addr_by_id: HashMap::new(),
-            next_id: 0,
         }
     }
 
@@ -81,11 +79,10 @@ impl Server {
                         if self.client_id_by_addr.contains_key(&src) {
                             continue; // join message from client who's already on the server
                         }
-                        let id = self.next_id;
+                        let id = self.model.add_player(String::from("UnknownPlayer"));
                         self.client_id_by_addr.insert(src, id);
                         self.client_addr_by_id.insert(id, src);
                         self.send_to(ServerMessage::ConnectionConfirm(id), src);
-                        self.next_id += 1;
                     },
                     ClientMessage::EchoRequest(id) =>
                         self.send_to(ServerMessage::EchoResponse(id), src),

@@ -24,7 +24,7 @@ pub trait ServerInterface {
     fn get_predicted_tick(&self) -> u64;
     fn get_intra_tick(&self) -> f64;
     fn get_next_tick_time(&self) -> Instant;
-    fn get_my_id(&self) -> Option<u64>;
+    fn get_my_player_id(&self) -> Option<u64>;
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput>;
     fn get_connection_state(&self) -> ConnectionState;
 }
