@@ -1,4 +1,5 @@
 use std::time::Instant;
+use std::thread;
 
 use shared::consts;
 use shared::consts::TICK_SPEED;
@@ -51,6 +52,16 @@ impl ServerInterface for LocalServerInterface {
         for _ in 0..tick_diff {
             model.set_character_input(self.my_id, input);
             model.tick();
+        }
+    }
+
+    fn handle_traffic(&mut self, until: Instant) {
+        loop {
+            let now = Instant::now();
+            if until <= now {
+                break;
+            }
+            thread::sleep(until - now);
         }
     }
 

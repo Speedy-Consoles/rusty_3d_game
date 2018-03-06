@@ -15,7 +15,6 @@ extern crate strum_macros;
 extern crate shared;
 
 use std::time::Instant;
-use std::thread;
 use std::env;
 
 use glium::glutin;
@@ -133,12 +132,12 @@ impl Client {
             // draw
             let now = Instant::now();
             if now >= next_draw_time {
-                let view_dir = if self.config.direct_camera {
-                    Some(self.character_input.view_dir)
-                } else {
-                    None
-                };
                 if let Some(my_id) = self.server_interface.get_my_id() {
+                    let view_dir = if self.config.direct_camera {
+                        Some(self.character_input.view_dir)
+                    } else {
+                        None
+                    };
                     self.graphics.draw(
                         &self.model.get_world(),
                         &self.predicted_world,
@@ -166,13 +165,8 @@ impl Client {
                 last_sec += std::time::Duration::from_secs(1)
             }
 
-            // sleep
-            let next_loop_time = next_tick_time.min(next_draw_time);
-            let now = Instant::now();
-            if next_loop_time > now {
-                let sleep_duration = next_loop_time - now;
-                thread::sleep(sleep_duration); // TODO handle network
-            }
+            // sleep / handle traffic
+            self.server_interface.handle_traffic(next_tick_time.min(next_draw_time));
         }
 
         // clean up grab, because it might cause errors otherwise

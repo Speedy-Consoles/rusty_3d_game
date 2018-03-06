@@ -2,6 +2,10 @@ extern crate shared;
 
 use std::net::UdpSocket;
 
+use shared::net::MAX_MESSAGE_LENGTH;
+use shared::net::ClientMessage;
+use shared::net::ServerMessage;
+
 pub struct Server {
     socket: UdpSocket,
 }
@@ -14,14 +18,22 @@ impl Server {
     }
 
     pub fn run(&mut self) {
-        // Receives a single datagram message on the socket. If `buf` is too small to hold
-        // the message, it will be cut off.
-        let mut buf = [0; 10];
-        while let Ok((amt, src)) = self.socket.recv_from(&mut buf) {
-            // Redeclare `buf` as slice of the received data and send reverse data back to origin.
-            let buf = &mut buf[..amt];
-            buf.reverse();
-            self.socket.send_to(buf, &src).unwrap();
+        let mut recv_buf = [0; MAX_MESSAGE_LENGTH];
+        let mut send_buf = [0; MAX_MESSAGE_LENGTH];
+        while let Ok((amt, src)) = self.socket.recv_from(&mut recv_buf) {
+            match ClientMessage::unpack(&recv_buf[..amt]) {
+                Ok(ClientMessage::ConnectionRequest) => {
+                    // TODO
+                },
+                Ok(ClientMessage::EchoRequest(id)) => {
+                    ServerMessage::EchoResponse(id).pack(&mut send_buf).unwrap();
+                    self.socket.send_to(&send_buf, &src).unwrap(); // TODO get rid of unwrap
+                },
+                Ok(ClientMessage::Leave) => {
+                    // TODO
+                },
+                Err(e) => println!("Received invalid message: {}", e),
+            }
         }
-    } // the socket is closed here
+    }
 }

@@ -20,6 +20,7 @@ pub enum ConnectionState {
 pub trait ServerInterface {
     fn tick(&mut self, model: &mut Model, input: CharacterInput);
     fn get_tick(&self) -> u64;
+    fn handle_traffic(&mut self, until: Instant);
     fn get_predicted_tick(&self) -> u64;
     fn get_intra_tick(&self) -> f64;
     fn get_next_tick_time(&self) -> Instant;
