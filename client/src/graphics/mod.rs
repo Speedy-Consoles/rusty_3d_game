@@ -8,12 +8,12 @@ use std::mem;
 use glium;
 use glium::backend::glutin::Display;
 use glium::Surface;
+use glium::Frame;
 use glium::draw_parameters::Depth;
 use glium::draw_parameters::DrawParameters;
 use glium::vertex::EmptyVertexAttributes;
 use glium::index::NoIndices;
 use cgmath::Matrix4;
-use cgmath::Vector3;
 use cgmath::SquareMatrix;
 use cgmath::Rad;
 use cgmath::PerspectiveFov;
@@ -26,6 +26,7 @@ use shared::consts::OPTIMAL_SCREEN_RATIO;
 use shared::consts::Z_NEAR;
 use shared::consts::Z_FAR;
 use self::visual_world::VisualWorld;
+use self::visual_world::VisualCharacter;
 
 #[derive(Copy, Clone)]
 struct MyVertex {
@@ -143,22 +144,46 @@ impl Graphics {
         }
 
         // world cs to character cs
-        let inverse_character_matrix =
+        let world_to_character_matrix =
             Matrix4::from_angle_y(Rad(pitch as f32))
             * Matrix4::from_angle_z(Rad(-yaw as f32))
             * Matrix4::from_translation(-character.get_pos());
 
-        // object cs to global cs
-        let object_position = Vector3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0f32,
-        };
-        let object_matrix = Matrix4::from_angle_z(Rad(0f32))
-                * Matrix4::from_translation(object_position);
-
         // world cs to screen cs
-        let world_to_screen_matrix = self.perspective_matrix * inverse_character_matrix;
+        let world_to_screen_matrix = self.perspective_matrix * world_to_character_matrix;
+
+        let mut frame = display.draw();
+        frame.clear_color(0.0, 0.0, 0.0, 1.0);
+        frame.clear_depth(1.0);
+
+        self.draw_background(&mut frame, &world_to_screen_matrix);
+
+        for (id, character) in self.mix_world.get_characters() {
+            if Some(*id) == my_character_id {
+                continue;
+            }
+            self.draw_character(character, &mut frame, &world_to_screen_matrix);
+        }
+        frame.finish().unwrap();
+    }
+
+    fn draw_background(&self, frame: &mut Frame, world_to_screen_matrix: &Matrix4<f32>) {
+        let screen_to_world_matrix_uniform: [[f32; 4]; 4] = world_to_screen_matrix.invert().unwrap().into();
+        let background_uniforms = uniform! { trafo_matrix: screen_to_world_matrix_uniform };
+
+        frame.draw(
+            EmptyVertexAttributes {len: 4},
+            &NoIndices(glium::index::PrimitiveType::TriangleStrip),
+            &self.background_program,
+            &background_uniforms,
+            &Default::default(),
+        ).unwrap();
+    }
+
+    fn draw_character(&self, character: &VisualCharacter,
+                      frame: &mut Frame, world_to_screen_matrix: &Matrix4<f32>) {
+        // object cs to global cs
+        let object_matrix = Matrix4::from_translation(character.get_pos().into());
 
         // object cs to screen cs
         let object_to_screen_matrix = world_to_screen_matrix * object_matrix;
@@ -166,8 +191,6 @@ impl Graphics {
         // uniforms
         let object_to_screen_matrix_uniform: [[f32; 4]; 4] = object_to_screen_matrix.into();
         let uniforms = uniform! { trafo_matrix: object_to_screen_matrix_uniform };
-        let screen_to_world_matrix_uniform: [[f32; 4]; 4] = world_to_screen_matrix.invert().unwrap().into();
-        let background_uniforms = uniform! { trafo_matrix: screen_to_world_matrix_uniform };
 
         // draw parameters
         let draw_parameters = DrawParameters {
@@ -178,18 +201,6 @@ impl Graphics {
             },
             ..Default::default()
         };
-
-        // background transformation matrix
-        let mut frame = display.draw();
-        frame.clear_color(0.0, 0.0, 0.0, 1.0);
-        frame.clear_depth(1.0);
-        frame.draw(
-            EmptyVertexAttributes {len: 4},
-            &NoIndices(glium::index::PrimitiveType::TriangleStrip),
-            &self.background_program,
-            &background_uniforms,
-            &Default::default(),
-        ).unwrap();
         frame.draw(
             &self.vertex_buffer,
             &self.index_buffer,
@@ -197,7 +208,6 @@ impl Graphics {
             &uniforms,
             &draw_parameters,
         ).unwrap();
-        frame.finish().unwrap();
     }
 
     fn load_shader_source(file_name: &str) -> String {

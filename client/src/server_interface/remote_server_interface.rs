@@ -143,7 +143,7 @@ impl ServerInterface for RemoteServerInterface {
             let tick_time = start_tick_time
                 + util::mult_duration(consts::tick_interval(), tick);
             self.tick_info = Some(TickInfo {
-                tick,
+                tick, // TODO this can give a lower tick than last time
                 tick_time,
             });
 
