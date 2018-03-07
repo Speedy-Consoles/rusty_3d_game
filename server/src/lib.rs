@@ -31,8 +31,10 @@ pub struct Server {
 
 impl Server {
     pub fn new() -> Server {
+        //let addr = "[::1]:51946";
+        let addr = "0.0.0.0:51946";
         Server {
-            socket: UdpSocket::bind("127.0.0.1:51946").unwrap(),
+            socket: UdpSocket::bind(addr).unwrap(),
             model: Model::new(),
             tick: 0,
             clients: HashMap::new(),

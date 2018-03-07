@@ -16,6 +16,7 @@ extern crate shared;
 
 use std::time::Instant;
 use std::env;
+use std::net::ToSocketAddrs;
 
 use glium::glutin;
 use glium::backend::glutin::Display;
@@ -70,7 +71,10 @@ impl Client {
         };
 
         let si: Box<ServerInterface> = match env::args().nth(1) {
-            Some(addr_string) => Box::new(RemoteServerInterface::new(addr_string).unwrap()),
+            Some(addr_string) => {
+                let mut addrs = addr_string.to_socket_addrs().unwrap();
+                Box::new(RemoteServerInterface::new(addrs.next().unwrap()).unwrap())
+            },
             None => Box::new(LocalServerInterface::new()),
         };
 

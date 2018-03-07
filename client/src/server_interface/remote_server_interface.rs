@@ -1,6 +1,6 @@
 use std::time::Instant;
 use std::io;
-use std::net::ToSocketAddrs;
+use std::net::SocketAddr;
 use std::net::UdpSocket;
 use std::io::ErrorKind;
 use std::collections::HashMap;
@@ -43,9 +43,13 @@ pub struct RemoteServerInterface {
 }
 
 impl RemoteServerInterface {
-    pub fn new<A: ToSocketAddrs>(addr: A) -> io::Result<RemoteServerInterface> {
+    pub fn new(addr: SocketAddr) -> io::Result<RemoteServerInterface> {
         // let the os decide over port
-        UdpSocket::bind("0.0.0.0:0").and_then(|socket| {
+        let local_addr = match addr {
+            SocketAddr::V4(_) => "0.0.0.0:0",
+            SocketAddr::V6(_) => "[::]:0",
+        };
+        UdpSocket::bind(local_addr).and_then(|socket| {
             if let Err(e) = socket.connect(addr) {
                 return Err(e);
             }
