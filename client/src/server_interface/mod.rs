@@ -40,4 +40,5 @@ pub trait ServerInterface {
     fn get_my_player_id(&self) -> Option<u64>;
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput>;
     fn get_connection_state(&self) -> ConnectionState;
+    fn disconnect(&mut self);
 }

@@ -85,4 +85,8 @@ impl ServerInterface for LocalServerInterface {
     fn get_connection_state(&self) -> ConnectionState {
         Connected
     }
+
+    fn disconnect(&mut self) {
+        // TODO
+    }
 }

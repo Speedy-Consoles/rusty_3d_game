@@ -26,7 +26,7 @@ pub struct Server {
     model: Model,
     tick: u64,
     clients: HashMap<u64, Client>,
-    client_id_by_addr: HashMap<SocketAddr, u64>,
+    clients_id_by_addr: HashMap<SocketAddr, u64>,
 }
 
 impl Server {
@@ -36,7 +36,7 @@ impl Server {
             model: Model::new(),
             tick: 0,
             clients: HashMap::new(),
-            client_id_by_addr: HashMap::new(),
+            clients_id_by_addr: HashMap::new(),
         }
     }
 
@@ -67,7 +67,7 @@ impl Server {
             // display tick rate
             let now = Instant::now();
             if now - last_sec > std::time::Duration::from_secs(1) {
-                println!("ticks/s: {}", tick_counter);
+                println!("ticks/s: {}, players: {}", tick_counter, self.clients.len());
                 tick_counter = 0;
                 last_sec += std::time::Duration::from_secs(1)
             }
@@ -92,7 +92,7 @@ impl Server {
     }
 
     fn handle_message(&mut self, message: ClientMessage, src: SocketAddr) {
-        let id_option = self.client_id_by_addr.get(&src).map(|id| *id);
+        let id_option = self.clients_id_by_addr.get(&src).map(|id| *id);
         match message {
             ClientMessage::ConnectionRequest => {
                 if id_option.is_some() {
@@ -100,7 +100,7 @@ impl Server {
                 }
                 let new_id = self.model.add_player(String::from("UnknownPlayer"));
                 self.clients.insert(new_id, Client { addr: src, inputs: HashMap::new() });
-                self.client_id_by_addr.insert(src, new_id);
+                self.clients_id_by_addr.insert(src, new_id);
                 self.send_to(ServerMessage::ConnectionConfirm(new_id), src);
             },
             ClientMessage::EchoRequest(id) => self.send_to(ServerMessage::EchoResponse(id), src),
@@ -117,11 +117,18 @@ impl Server {
             },
             ClientMessage::Leave => {
                 if let Some(id) = id_option {
-                    let _client = self.clients.get_mut(&id).unwrap();
-                    // TODO
+                    self.remove_client(id);
                 }
             },
         }
+    }
+
+    fn remove_client(&mut self, id: u64) {
+        self.model.remove_player(id);
+        let client = self.clients.remove(&id).unwrap();
+        let msg = ServerMessage::Kick;
+        self.send_to(msg, client.addr);
+        self.clients_id_by_addr.remove(&client.addr).unwrap();
     }
 
     fn send_to(&mut self, msg: ServerMessage, dst: SocketAddr) {

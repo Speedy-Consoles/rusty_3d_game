@@ -89,6 +89,18 @@ impl RemoteServerInterface {
         }
     }
 
+    fn handle_message(&mut self, msg: ServerMessage) {
+        use shared::net::ServerMessage::*;
+        match msg {
+            ConnectionConfirm(my_player_id) => self.internal_state = BeforeSnapshot {
+                my_player_id
+            },
+            Snapshot(s) => self.on_snapshot(s),
+            Kick => self.internal_state = Disconnected,
+            EchoResponse(_) => (),
+        }
+    }
+
     fn send(&self, msg: ClientMessage) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let amount = msg.pack(&mut buf).unwrap();
@@ -147,7 +159,6 @@ impl ServerInterface for RemoteServerInterface {
     }
 
     fn handle_traffic(&mut self, until: Instant) {
-        use shared::net::ServerMessage::*;
         loop {
             let now = Instant::now();
             if until <= now {
@@ -155,13 +166,7 @@ impl ServerInterface for RemoteServerInterface {
             }
             self.socket.set_read_timeout(Some(until - now)).unwrap();
             if let Some(msg) = self.recv() {
-                match msg {
-                    ConnectionConfirm(my_player_id) => self.internal_state = BeforeSnapshot {
-                        my_player_id
-                    },
-                    Snapshot(s) =>  self.on_snapshot(s),
-                    _ => (), // TODO
-                }
+                self.handle_message(msg);
             }
         }
     }
@@ -193,5 +198,10 @@ impl ServerInterface for RemoteServerInterface {
             Disconnecting => ConnectionState::Disconnecting,
             Disconnected => ConnectionState::Disconnected,
         }
+    }
+
+    fn disconnect(&mut self) {
+        self.send(ClientMessage::Leave);
+        self.internal_state = Disconnecting;
     }
 }

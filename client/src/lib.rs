@@ -169,6 +169,8 @@ impl Client {
             self.server_interface.handle_traffic(next_tick_time.min(next_draw_time));
         }
 
+        self.server_interface.disconnect();
+
         // clean up grab, because it might cause errors otherwise
         self.try_set_cursor_grab(false);
     }
