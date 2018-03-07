@@ -116,11 +116,9 @@ impl Client {
                 self.server_interface.tick(&mut self.model, character_input);
                 self.character_input.reset_flags();
                 if let Some(tick_info) = self.server_interface.get_tick_info() {
-                    if let Some(tick_lag) = self.server_interface.get_tick_lag() {
-                        self.predict(tick_info.tick + 1, tick_lag);
-                    }
+                    let tick_lag = self.server_interface.get_tick_lag();
+                    self.predict(tick_info.tick + 1, tick_lag);
                     next_tick_time = tick_info.tick_time + consts::tick_interval();
-                    // TODO what if this is still the same tick as last time?
                 } else {
                     next_tick_time = Instant::now() + consts::tick_interval();
                 }
@@ -153,8 +151,8 @@ impl Client {
                         );
                     }
                 }
-                let draw_diff = util::elapsed_ticks(&next_draw_time.elapsed(), DRAW_SPEED);
-                next_draw_time += util::mult_duration(&consts::draw_interval(), draw_diff + 1);
+                let draw_diff = util::elapsed_ticks(next_draw_time.elapsed(), DRAW_SPEED);
+                next_draw_time += util::mult_duration(consts::draw_interval(), draw_diff + 1);
                 draw_counter += 1;
             }
 

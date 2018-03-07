@@ -1,5 +1,4 @@
 use std::time::Instant;
-use std::time::Duration;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::net::UdpSocket;
@@ -12,20 +11,32 @@ use shared::net::ClientMessage;
 use shared::net::Packable;
 use shared::net::Snapshot;
 use shared::net::MAX_MESSAGE_LENGTH;
+use shared::consts;
+use shared::consts::TICK_SPEED;
+use shared::consts::NEWEST_TICK_TIME_WEIGHT;
+use shared::util;
 
 use super::ConnectionState;
-use super::ConnectionState::*;
 use super::ServerInterface;
 use super::TickInfo;
+use self::InternalState::*;
 
+enum InternalState {
+    Connecting,
+    BeforeSnapshot { my_player_id: u64 },
+    AfterSnapshot {
+        my_player_id: u64,
+        estimated_start_tick_time: Instant,
+        last_snapshot: Snapshot,
+    },
+    Disconnecting,
+    Disconnected,
+}
 
 pub struct RemoteServerInterface {
     socket: UdpSocket,
-    connection_state: ConnectionState,
+    internal_state: InternalState,
     tick_info: Option<TickInfo>,
-    tick_lag: Option<u64>,
-    my_player_id: Option<u64>,
-    last_snapshot: Option<Snapshot>,
 }
 
 impl RemoteServerInterface {
@@ -37,15 +48,37 @@ impl RemoteServerInterface {
             }
             let mut rsi = RemoteServerInterface {
                 socket,
-                connection_state: Disconnected,
+                internal_state: Connecting,
                 tick_info: None,
-                tick_lag: None,
-                my_player_id: None,
-                last_snapshot: None,
             };
             rsi.send(ClientMessage::ConnectionRequest);
             Ok(rsi)
         })
+    }
+
+    fn on_snapshot(&mut self, snapshot: Snapshot) {
+        let estt = Instant::now() - util::mult_duration(
+            consts::tick_interval(),
+            snapshot.get_tick()
+        ) + consts::tick_time_tolerance();
+        match self.internal_state {
+            Connecting | Disconnecting | Disconnected => (), // ignore snapshot
+            BeforeSnapshot { my_player_id } => self.internal_state = AfterSnapshot {
+                my_player_id,
+                estimated_start_tick_time: estt,
+                last_snapshot: snapshot,
+            },
+            AfterSnapshot { ref mut estimated_start_tick_time, ref mut last_snapshot, .. } => {
+                if snapshot > *last_snapshot {
+                    *estimated_start_tick_time = util::mix_time(
+                        *estimated_start_tick_time,
+                        estt,
+                        NEWEST_TICK_TIME_WEIGHT
+                    );
+                    *last_snapshot = snapshot;
+                }
+            },
+        }
     }
 
     fn send(&mut self, msg: ClientMessage) {
@@ -79,15 +112,24 @@ impl RemoteServerInterface {
 
 impl ServerInterface for RemoteServerInterface {
     fn tick(&mut self, model: &mut Model, input: CharacterInput) {
-        match self.connection_state { // TODO
-            Connected => (),
+        // TODO send input
+        match self.internal_state {
+            AfterSnapshot { estimated_start_tick_time, ref last_snapshot, .. } => {
+                let diff = Instant::now() - estimated_start_tick_time;
+                let tick = util::elapsed_ticks(diff, TICK_SPEED);
+                let tick_time = estimated_start_tick_time
+                    + util::mult_duration(consts::tick_interval(), tick);
+                self.tick_info = Some(TickInfo {
+                    tick,
+                    tick_time,
+                });
+                *model = last_snapshot.get_model().clone();
+                for _ in last_snapshot.get_tick()..tick {
+                    model.tick();
+                }
+            },
             _ => return,
         }
-        if let Some(ref snapshot) = self.last_snapshot {
-            *model = snapshot.get_model().clone();
-        }
-        // TODO send input
-        self.send(ClientMessage::EchoRequest(42));
     }
 
     fn handle_traffic(&mut self, until: Instant) {
@@ -99,27 +141,12 @@ impl ServerInterface for RemoteServerInterface {
             }
             self.socket.set_read_timeout(Some(until - now)).unwrap();
             if let Some(msg) = self.recv() {
-                let now = Instant::now();
                 println!("{:?}", msg);
                 match msg {
-                    ConnectionConfirm(id) => {
-                        self.my_player_id = Some(id);
-                        self.connection_state = Connected;
+                    ConnectionConfirm(my_player_id) => self.internal_state = BeforeSnapshot {
+                        my_player_id
                     },
-                    Snapshot(new_snapshot) => {
-                        let replace = if let Some(ref last_snapshot) = self.last_snapshot {
-                            *last_snapshot < new_snapshot
-                        } else {
-                            true
-                        };
-                        if replace {
-                            self.tick_info = Some(TickInfo {
-                                tick: new_snapshot.get_tick(),
-                                tick_time: now,
-                            });
-                            self.last_snapshot = Some(new_snapshot)
-                        }
-                    },
+                    Snapshot(s) =>  self.on_snapshot(s),
                     _ => (), // TODO
                 }
             }
@@ -130,12 +157,16 @@ impl ServerInterface for RemoteServerInterface {
         self.tick_info
     }
 
-    fn get_tick_lag(&self) -> Option<u64> {
-        self.tick_lag
+    fn get_tick_lag(&self) -> u64 {
+        0
     }
 
     fn get_my_player_id(&self) -> Option<u64> {
-        self.my_player_id
+        match self.internal_state {
+            BeforeSnapshot { my_player_id }
+            | AfterSnapshot { my_player_id, .. } => Some(my_player_id),
+            _ => None
+        }
     }
 
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput> {
@@ -144,6 +175,11 @@ impl ServerInterface for RemoteServerInterface {
     }
 
     fn get_connection_state(&self) -> ConnectionState {
-        self.connection_state
+        match self.internal_state {
+            Connecting => ConnectionState::Connecting,
+            BeforeSnapshot {..} | AfterSnapshot {..} => ConnectionState::Connected,
+            Disconnecting => ConnectionState::Disconnecting,
+            Disconnected => ConnectionState::Disconnected,
+        }
     }
 }

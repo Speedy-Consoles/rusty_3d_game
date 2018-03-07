@@ -36,7 +36,7 @@ pub trait ServerInterface {
     fn tick(&mut self, model: &mut Model, input: CharacterInput);
     fn handle_traffic(&mut self, until: Instant);
     fn get_tick_info(&self) -> Option<TickInfo>;
-    fn get_tick_lag(&self) -> Option<u64>;
+    fn get_tick_lag(&self) -> u64;
     fn get_my_player_id(&self) -> Option<u64>;
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput>;
     fn get_connection_state(&self) -> ConnectionState;

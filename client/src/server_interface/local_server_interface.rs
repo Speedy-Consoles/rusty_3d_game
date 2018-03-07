@@ -31,13 +31,13 @@ impl LocalServerInterface {
 impl ServerInterface for LocalServerInterface {
     fn tick(&mut self, model: &mut Model, input: CharacterInput) {
         let now = Instant::now();
-        let mut tick_diff;
+        let tick_diff;
         if let Some(ref mut tick_info) = self.tick_info {
             let prev_tick = tick_info.tick;
             let diff = now - self.start_tick_time;
-            tick_info.tick = util::elapsed_ticks(&diff, TICK_SPEED);
+            tick_info.tick = util::elapsed_ticks(diff, TICK_SPEED);
             tick_info.tick_time = self.start_tick_time
-                + util::mult_duration(&consts::tick_interval(), tick_info.tick);
+                + util::mult_duration(consts::tick_interval(), tick_info.tick);
             tick_diff = tick_info.tick - prev_tick;
         } else {
             self.start_tick_time = now;
@@ -70,8 +70,8 @@ impl ServerInterface for LocalServerInterface {
         self.tick_info
     }
 
-    fn get_tick_lag(&self) -> Option<u64> {
-        Some(0)
+    fn get_tick_lag(&self) -> u64 {
+        0
     }
 
     fn get_my_player_id(&self) -> Option<u64> {
