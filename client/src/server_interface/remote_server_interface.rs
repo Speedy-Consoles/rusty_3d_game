@@ -3,6 +3,7 @@ use std::io;
 use std::net::ToSocketAddrs;
 use std::net::UdpSocket;
 use std::io::ErrorKind;
+use std::collections::HashMap;
 
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
@@ -37,6 +38,8 @@ pub struct RemoteServerInterface {
     socket: UdpSocket,
     internal_state: InternalState,
     tick_info: Option<TickInfo>,
+    tick_lag: u64,
+    sent_inputs: HashMap<u64, CharacterInput>,
 }
 
 impl RemoteServerInterface {
@@ -46,10 +49,12 @@ impl RemoteServerInterface {
             if let Err(e) = socket.connect(addr) {
                 return Err(e);
             }
-            let mut rsi = RemoteServerInterface {
+            let rsi = RemoteServerInterface {
                 socket,
                 internal_state: Connecting,
                 tick_info: None,
+                tick_lag: 0,
+                sent_inputs: HashMap::new(),
             };
             rsi.send(ClientMessage::ConnectionRequest);
             Ok(rsi)
@@ -70,6 +75,9 @@ impl RemoteServerInterface {
             },
             AfterSnapshot { ref mut start_tick_time, ref mut last_snapshot, .. } => {
                 if snapshot > *last_snapshot {
+                    for tick in (last_snapshot.get_tick() + 1)..(snapshot.get_tick() + 1) {
+                        self.sent_inputs.remove(&tick);
+                    }
                     *start_tick_time = util::mix_time(
                         *start_tick_time,
                         new_start_tick_time,
@@ -124,10 +132,11 @@ impl ServerInterface for RemoteServerInterface {
             });
 
             // send input
-            // TODO use realistic delay
-            // TODO save input for prediction
-            let msg = ClientMessage::Input { tick: tick + 10, input };
+            self.tick_lag = 50; // TODO use realistic delay
+            let input_tick = tick + self.tick_lag;
+            let msg = ClientMessage::Input { tick: input_tick, input };
             self.send(msg);
+            self.sent_inputs.insert(input_tick, input);
 
             // update model
             *model = last_snapshot.get_model().clone();
@@ -162,7 +171,7 @@ impl ServerInterface for RemoteServerInterface {
     }
 
     fn get_tick_lag(&self) -> u64 {
-        0
+        self.tick_lag
     }
 
     fn get_my_player_id(&self) -> Option<u64> {
@@ -174,8 +183,7 @@ impl ServerInterface for RemoteServerInterface {
     }
 
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput> {
-        // TODO
-        None
+        self.sent_inputs.get(&tick).map(|input| *input)
     }
 
     fn get_connection_state(&self) -> ConnectionState {
