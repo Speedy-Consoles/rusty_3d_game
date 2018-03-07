@@ -9,17 +9,24 @@ use std::io::ErrorKind;
 use shared::util;
 use shared::consts;
 use shared::model::Model;
+use shared::model::world::character::CharacterInput;
 use shared::net::ClientMessage;
 use shared::net::ServerMessage;
 use shared::net::Packable;
 use shared::net::Snapshot;
 use shared::net::MAX_MESSAGE_LENGTH;
 
+struct Client {
+    addr: SocketAddr,
+    inputs: HashMap<u64, CharacterInput>,
+}
+
 pub struct Server {
     socket: UdpSocket,
     model: Model,
+    tick: u64,
+    clients: HashMap<u64, Client>,
     client_id_by_addr: HashMap<SocketAddr, u64>,
-    client_addr_by_id: HashMap<u64, SocketAddr>,
 }
 
 impl Server {
@@ -27,8 +34,9 @@ impl Server {
         Server {
             socket: UdpSocket::bind("127.0.0.1:51946").unwrap(),
             model: Model::new(),
+            tick: 0,
+            clients: HashMap::new(),
             client_id_by_addr: HashMap::new(),
-            client_addr_by_id: HashMap::new(),
         }
     }
 
@@ -40,18 +48,20 @@ impl Server {
         // for sleep timing
         let start_tick_time = Instant::now();
         let mut next_tick_time;
-        let mut tick = 0;
 
         // main loop
         loop { // TODO add way to exit
             // tick
-            // TODO apply character inputs for this tick
+            for (id, client) in self.clients.iter_mut() {
+                if let Some(input) = client.inputs.remove(&self.tick) {
+                    self.model.set_character_input(*id, input);
+                }
+            }
             self.model.tick();
-            tick += 1;
-            let snapshot = ServerMessage::Snapshot(Snapshot::new(tick, &self.model));
+            let snapshot = ServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
             self.broadcast(snapshot);
             next_tick_time = start_tick_time
-                    + util::mult_duration(consts::tick_interval(), tick);
+                    + util::mult_duration(consts::tick_interval(), self.tick);
             tick_counter += 1;
 
             // display tick rate
@@ -64,6 +74,7 @@ impl Server {
 
             // sleep / handle traffic
             self.handle_traffic(next_tick_time);
+            self.tick += 1;
         }
     }
 
@@ -75,25 +86,41 @@ impl Server {
             }
             self.socket.set_read_timeout(Some(until - now)).unwrap();
             if let Some((msg, src)) = self.recv_from() {
-                match msg {
-                    ClientMessage::ConnectionRequest => {
-                        if self.client_id_by_addr.contains_key(&src) {
-                            continue; // join message from client who's already on the server
-                        }
-                        let id = self.model.add_player(String::from("UnknownPlayer"));
-                        self.client_id_by_addr.insert(src, id);
-                        self.client_addr_by_id.insert(id, src);
-                        self.send_to(ServerMessage::ConnectionConfirm(id), src);
-                    },
-                    ClientMessage::EchoRequest(id) =>
-                        self.send_to(ServerMessage::EchoResponse(id), src),
-                    ClientMessage::Leave => {
-                        // TODO
-                    },
-                }
-                println!("{:?}", msg);
-                // TODO
+                self.handle_message(msg, src);
             }
+        }
+    }
+
+    fn handle_message(&mut self, message: ClientMessage, src: SocketAddr) {
+        let id_option = self.client_id_by_addr.get(&src).map(|id| *id);
+        match message {
+            ClientMessage::ConnectionRequest => {
+                if id_option.is_some() {
+                    return;
+                }
+                let new_id = self.model.add_player(String::from("UnknownPlayer"));
+                self.clients.insert(new_id, Client { addr: src, inputs: HashMap::new() });
+                self.client_id_by_addr.insert(src, new_id);
+                self.send_to(ServerMessage::ConnectionConfirm(new_id), src);
+            },
+            ClientMessage::EchoRequest(id) => self.send_to(ServerMessage::EchoResponse(id), src),
+            ClientMessage::Input { tick, input } => {
+                if let Some(id) = id_option {
+                    let client = self.clients.get_mut(&id).unwrap();
+                    if tick > self.tick {
+                        client.inputs.insert(tick, input);
+                        // TODO ignore insanely high ticks
+                    } else {
+                        println!("Input came too late!");
+                    }
+                }
+            },
+            ClientMessage::Leave => {
+                if let Some(id) = id_option {
+                    let _client = self.clients.get_mut(&id).unwrap();
+                    // TODO
+                }
+            },
         }
     }
 
@@ -106,8 +133,8 @@ impl Server {
     fn broadcast(&mut self, msg: ServerMessage) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let amount = msg.pack(&mut buf).unwrap();
-        for dst in self.client_addr_by_id.values() {
-            self.socket.send_to(&buf[..amount], dst).unwrap();
+        for client in self.clients.values() {
+            self.socket.send_to(&buf[..amount], client.addr).unwrap();
         }
     }
 

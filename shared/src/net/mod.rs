@@ -9,6 +9,8 @@ use serde::Serialize;
 use serde::Deserialize;
 
 use model::Model;
+use model::world::character::CharacterInput;
+
 
 pub const MAX_MESSAGE_LENGTH: usize = 1024;
 
@@ -32,6 +34,7 @@ impl<'a, T: Serialize + Deserialize<'a>> Packable<'a> for T {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     ConnectionRequest,
+    Input { tick: u64, input: CharacterInput, },
     EchoRequest(u64),
     Leave,
 }

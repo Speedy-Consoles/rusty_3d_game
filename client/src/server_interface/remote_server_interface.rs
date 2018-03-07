@@ -26,7 +26,7 @@ enum InternalState {
     BeforeSnapshot { my_player_id: u64 },
     AfterSnapshot {
         my_player_id: u64,
-        estimated_start_tick_time: Instant,
+        start_tick_time: Instant,
         last_snapshot: Snapshot,
     },
     Disconnecting,
@@ -57,7 +57,7 @@ impl RemoteServerInterface {
     }
 
     fn on_snapshot(&mut self, snapshot: Snapshot) {
-        let estt = Instant::now() - util::mult_duration(
+        let new_start_tick_time = Instant::now() - util::mult_duration(
             consts::tick_interval(),
             snapshot.get_tick()
         ) + consts::tick_time_tolerance();
@@ -65,14 +65,14 @@ impl RemoteServerInterface {
             Connecting | Disconnecting | Disconnected => (), // ignore snapshot
             BeforeSnapshot { my_player_id } => self.internal_state = AfterSnapshot {
                 my_player_id,
-                estimated_start_tick_time: estt,
+                start_tick_time: new_start_tick_time,
                 last_snapshot: snapshot,
             },
-            AfterSnapshot { ref mut estimated_start_tick_time, ref mut last_snapshot, .. } => {
+            AfterSnapshot { ref mut start_tick_time, ref mut last_snapshot, .. } => {
                 if snapshot > *last_snapshot {
-                    *estimated_start_tick_time = util::mix_time(
-                        *estimated_start_tick_time,
-                        estt,
+                    *start_tick_time = util::mix_time(
+                        *start_tick_time,
+                        new_start_tick_time,
                         NEWEST_TICK_TIME_WEIGHT
                     );
                     *last_snapshot = snapshot;
@@ -81,7 +81,7 @@ impl RemoteServerInterface {
         }
     }
 
-    fn send(&mut self, msg: ClientMessage) {
+    fn send(&self, msg: ClientMessage) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let amount = msg.pack(&mut buf).unwrap();
         self.socket.send(&buf[..amount]).unwrap();
@@ -112,23 +112,28 @@ impl RemoteServerInterface {
 
 impl ServerInterface for RemoteServerInterface {
     fn tick(&mut self, model: &mut Model, input: CharacterInput) {
-        // TODO send input
-        match self.internal_state {
-            AfterSnapshot { estimated_start_tick_time, ref last_snapshot, .. } => {
-                let diff = Instant::now() - estimated_start_tick_time;
-                let tick = util::elapsed_ticks(diff, TICK_SPEED);
-                let tick_time = estimated_start_tick_time
-                    + util::mult_duration(consts::tick_interval(), tick);
-                self.tick_info = Some(TickInfo {
-                    tick,
-                    tick_time,
-                });
-                *model = last_snapshot.get_model().clone();
-                for _ in last_snapshot.get_tick()..tick {
-                    model.tick();
-                }
-            },
-            _ => return,
+        if let AfterSnapshot { start_tick_time, ref last_snapshot, .. } = self.internal_state {
+            // update tick
+            let diff = Instant::now() - start_tick_time;
+            let tick = util::elapsed_ticks(diff, TICK_SPEED);
+            let tick_time = start_tick_time
+                + util::mult_duration(consts::tick_interval(), tick);
+            self.tick_info = Some(TickInfo {
+                tick,
+                tick_time,
+            });
+
+            // send input
+            // TODO use realistic delay
+            // TODO save input for prediction
+            let msg = ClientMessage::Input { tick: tick + 10, input };
+            self.send(msg);
+
+            // update model
+            *model = last_snapshot.get_model().clone();
+            for _ in last_snapshot.get_tick()..tick {
+                model.tick();
+            }
         }
     }
 
@@ -141,7 +146,6 @@ impl ServerInterface for RemoteServerInterface {
             }
             self.socket.set_read_timeout(Some(until - now)).unwrap();
             if let Some(msg) = self.recv() {
-                println!("{:?}", msg);
                 match msg {
                     ConnectionConfirm(my_player_id) => self.internal_state = BeforeSnapshot {
                         my_player_id
