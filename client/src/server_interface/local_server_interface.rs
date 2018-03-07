@@ -10,23 +10,20 @@ use shared::model::world::character::CharacterInput;
 use super::ConnectionState;
 use super::ConnectionState::*;
 use super::ServerInterface;
+use super::TickInfo;
 
 pub struct LocalServerInterface {
     start_tick_time: Instant,
-    tick: u64,
-    next_tick_time: Instant,
-    is_first_tick: bool,
-    my_id: u64,
+    tick_info: Option<TickInfo>,
+    my_player_id: Option<u64>,
 }
 
 impl LocalServerInterface {
     pub fn new() -> LocalServerInterface {
         LocalServerInterface {
             start_tick_time: Instant::now(),
-            tick: 0,
-            next_tick_time: Instant::now(),
-            is_first_tick: true,
-            my_id: 0,
+            tick_info: None,
+            my_player_id: None,
         }
     }
 }
@@ -34,23 +31,27 @@ impl LocalServerInterface {
 impl ServerInterface for LocalServerInterface {
     fn tick(&mut self, model: &mut Model, input: CharacterInput) {
         let now = Instant::now();
-        let mut prev_tick = self.tick;
-        if self.is_first_tick {
-            self.start_tick_time = now;
-            prev_tick = 0;
-            self.tick = 0;
-            self.my_id = model.add_player(String::from("Player"));
-            self.is_first_tick = false;
-        } else {
+        let mut tick_diff;
+        if let Some(ref mut tick_info) = self.tick_info {
+            let prev_tick = tick_info.tick;
             let diff = now - self.start_tick_time;
-            self.tick = util::elapsed_ticks(&diff, TICK_SPEED);
+            tick_info.tick = util::elapsed_ticks(&diff, TICK_SPEED);
+            tick_info.tick_time = self.start_tick_time
+                + util::mult_duration(&consts::tick_interval(), tick_info.tick);
+            tick_diff = tick_info.tick - prev_tick;
+        } else {
+            self.start_tick_time = now;
+            self.tick_info = Some(TickInfo {
+                tick: 0,
+                tick_time: now,
+            });
+            tick_diff = 1;
+            self.my_player_id = Some(model.add_player(String::from("Player")));
         }
-        self.next_tick_time = self.start_tick_time
-            + util::mult_duration(&consts::tick_interval(), self.tick + 1);
 
-        let tick_diff = self.tick - prev_tick;
+        let my_player_id = self.my_player_id.unwrap();
         for _ in 0..tick_diff {
-            model.set_character_input(self.my_id, input);
+            model.set_character_input(my_player_id, input);
             model.tick();
         }
     }
@@ -65,32 +66,16 @@ impl ServerInterface for LocalServerInterface {
         }
     }
 
-    fn get_tick(&self) -> u64 {
-        self.tick
+    fn get_tick_info(&self) -> Option<TickInfo> {
+        self.tick_info
     }
 
-    fn get_predicted_tick(&self) -> u64 {
-        self.tick
-    }
-
-    fn get_intra_tick(&self) -> f64 {
-        let now = Instant::now();
-        let diff = now - self.start_tick_time
-            - util::mult_duration(&consts::tick_interval(), self.tick);
-        let sec_diff = diff.as_secs() as f64 + diff.subsec_nanos() as f64 * 1e-9;
-        sec_diff * TICK_SPEED as f64
-    }
-
-    fn get_next_tick_time(&self) -> Instant {
-        self.next_tick_time
+    fn get_tick_lag(&self) -> Option<u64> {
+        Some(0)
     }
 
     fn get_my_player_id(&self) -> Option<u64> {
-        if self.is_first_tick {
-            None
-        } else {
-            Some(self.my_id)
-        }
+        self.my_player_id
     }
 
     fn get_character_input(&self, _tick: u64) -> Option<CharacterInput> {

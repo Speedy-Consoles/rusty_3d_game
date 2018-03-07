@@ -9,9 +9,10 @@ use self::world::character::CharacterInput;
 
 // TODO maybe replace ids with weak references?
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {
     players: HashMap<u64, Player>,
-    world: world::World,
+    world: World,
     next_player_id: u64,
 }
 

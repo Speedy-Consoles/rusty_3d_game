@@ -21,10 +21,10 @@ const FP_SIN_RESOLUTION_RATIO: u64 = 1 << FP_SIN_PRECISION_DIFF;
 const SIN_QUARTER_MASK: u64 = (!0) % SIN_QUARTER_RESOLUTION;
 const SIN_INTRA_MASK: u64 = (!0) % FP_SIN_RESOLUTION_RATIO;
 
-custom_derive! {
-    #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord,
-    NewtypeAdd, NewtypeSub, NewtypeAddAssign, NewtypeSubAssign,
-    NewtypeRem, NewtypeNeg)]
+macro_attr! {
+    #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    NewtypeAdd!, NewtypeSub!, NewtypeAddAssign!, NewtypeSubAssign!,
+    NewtypeRem!, NewtypeNeg!)]
     pub struct FixedPoint(i64);
 }
 
@@ -175,10 +175,10 @@ impl fmt::Debug for FixedPoint {
     }
 }
 
-custom_derive! {
-    #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord,
-    NewtypeAdd, NewtypeSub, NewtypeMul, NewtypeDiv, NewtypeAddAssign, NewtypeSubAssign,
-    NewtypeRem, NewtypeNeg, NewtypeFrom)]
+macro_attr! {
+    #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    NewtypeAdd!, NewtypeSub!, NewtypeMul!, NewtypeDiv!, NewtypeAddAssign!, NewtypeSubAssign!,
+    NewtypeRem!, NewtypeNeg!, NewtypeFrom!)]
     pub struct FPAngle(FixedPoint);
 }
 

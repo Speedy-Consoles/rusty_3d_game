@@ -115,8 +115,15 @@ impl Client {
                 }
                 self.server_interface.tick(&mut self.model, character_input);
                 self.character_input.reset_flags();
-                self.predict();
-                next_tick_time = self.server_interface.get_next_tick_time();
+                if let Some(tick_info) = self.server_interface.get_tick_info() {
+                    if let Some(tick_lag) = self.server_interface.get_tick_lag() {
+                        self.predict(tick_info.tick + 1, tick_lag);
+                    }
+                    next_tick_time = tick_info.tick_time + consts::tick_interval();
+                    // TODO what if this is still the same tick as last time?
+                } else {
+                    next_tick_time = Instant::now() + consts::tick_interval();
+                }
                 tick_counter += 1;
             }
 
@@ -129,21 +136,22 @@ impl Client {
             let now = Instant::now();
             if now >= next_draw_time {
                 if let Some(my_player_id) = self.server_interface.get_my_player_id() {
-                    // TODO my_id != my_character_id
-                    let view_dir = if self.config.direct_camera {
-                        Some(self.character_input.view_dir)
-                    } else {
-                        None
-                    };
-                    self.graphics.draw(
-                        &self.model,
-                        &self.predicted_world,
-                        my_player_id,
-                        view_dir,
-                        self.server_interface.get_tick(),
-                        self.server_interface.get_intra_tick(),
-                        &self.display
-                    );
+                    if let Some(tick_info) = self.server_interface.get_tick_info() {
+                        let view_dir = if self.config.direct_camera {
+                            Some(self.character_input.view_dir)
+                        } else {
+                            None
+                        };
+                        self.graphics.draw(
+                            &self.model,
+                            &self.predicted_world,
+                            my_player_id,
+                            view_dir,
+                            tick_info.tick,
+                            tick_info.get_intra_tick(),
+                            &self.display
+                        );
+                    }
                 }
                 let draw_diff = util::elapsed_ticks(&next_draw_time.elapsed(), DRAW_SPEED);
                 next_draw_time += util::mult_duration(&consts::draw_interval(), draw_diff + 1);
@@ -189,10 +197,10 @@ impl Client {
         }
     }
 
-    fn predict(&mut self) {
+    fn predict(&mut self, start_tick: u64, num_ticks: u64) {
         if let Some(my_id) = self.server_interface.get_my_player_id() {
             self.predicted_world = self.model.get_world().clone();
-            for tick in self.server_interface.get_tick()..self.server_interface.get_predicted_tick() {
+            for tick in start_tick..(start_tick + num_ticks) {
                 if let Some(input) = self.server_interface.get_character_input(tick) {
                     self.predicted_world.set_character_input(my_id, input);
                 }

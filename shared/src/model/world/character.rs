@@ -2,7 +2,7 @@ use math::FixedPoint;
 use math::FPAngle;
 use math::Vec3;
 
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
 pub struct ViewDir {
     yaw: FPAngle,
     pitch: FPAngle,
@@ -28,7 +28,7 @@ impl ViewDir {
     }
 }
 
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
 pub struct CharacterInput {
     pub forward: bool,
     pub backward: bool,
@@ -45,7 +45,7 @@ impl CharacterInput {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Character {
     input: CharacterInput,
     pos: Vec3,

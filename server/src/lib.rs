@@ -12,6 +12,7 @@ use shared::model::Model;
 use shared::net::ClientMessage;
 use shared::net::ServerMessage;
 use shared::net::Packable;
+use shared::net::Snapshot;
 use shared::net::MAX_MESSAGE_LENGTH;
 
 pub struct Server {
@@ -38,23 +39,22 @@ impl Server {
 
         // for sleep timing
         let start_tick_time = Instant::now();
-        let mut next_tick_time = Instant::now();
+        let mut next_tick_time;
         let mut tick = 0;
 
         // main loop
         loop { // TODO add way to exit
             // tick
-            let now = Instant::now();
-            if now >= next_tick_time {
-                // TODO apply character inputs for this tick
-                self.model.tick();
-                tick += 1;
-                next_tick_time = start_tick_time
-                        + util::mult_duration(&consts::tick_interval(), tick);
-                tick_counter += 1;
-            }
+            // TODO apply character inputs for this tick
+            self.model.tick();
+            tick += 1;
+            let snapshot = ServerMessage::Snapshot(Snapshot::new(tick, &self.model));
+            self.broadcast(snapshot);
+            next_tick_time = start_tick_time
+                    + util::mult_duration(&consts::tick_interval(), tick);
+            tick_counter += 1;
 
-            // display rate
+            // display tick rate
             let now = Instant::now();
             if now - last_sec > std::time::Duration::from_secs(1) {
                 println!("ticks/s: {}", tick_counter);
@@ -101,6 +101,14 @@ impl Server {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let amount = msg.pack(&mut buf).unwrap();
         self.socket.send_to(&buf[..amount], dst).unwrap();
+    }
+
+    fn broadcast(&mut self, msg: ServerMessage) {
+        let mut buf = [0; MAX_MESSAGE_LENGTH];
+        let amount = msg.pack(&mut buf).unwrap();
+        for dst in self.client_addr_by_id.values() {
+            self.socket.send_to(&buf[..amount], dst).unwrap();
+        }
     }
 
     fn recv_from(&self) -> Option<(ClientMessage, SocketAddr)> {

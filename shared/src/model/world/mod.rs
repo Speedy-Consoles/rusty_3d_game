@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use self::character::Character;
 use self::character::CharacterInput;
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct World {
     characters: HashMap<u64, Character>,
     next_character_id: u64,

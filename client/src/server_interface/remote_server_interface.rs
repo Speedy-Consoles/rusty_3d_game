@@ -10,31 +10,38 @@ use shared::model::world::character::CharacterInput;
 use shared::net::ServerMessage;
 use shared::net::ClientMessage;
 use shared::net::Packable;
+use shared::net::Snapshot;
 use shared::net::MAX_MESSAGE_LENGTH;
 
 use super::ConnectionState;
 use super::ConnectionState::*;
 use super::ServerInterface;
+use super::TickInfo;
 
 
 pub struct RemoteServerInterface {
     socket: UdpSocket,
     connection_state: ConnectionState,
+    tick_info: Option<TickInfo>,
+    tick_lag: Option<u64>,
     my_player_id: Option<u64>,
+    last_snapshot: Option<Snapshot>,
 }
 
 impl RemoteServerInterface {
     pub fn new<A: ToSocketAddrs>(addr: A) -> io::Result<RemoteServerInterface> {
         // let the os decide over port
         UdpSocket::bind("0.0.0.0:0").and_then(|socket| {
-            socket.set_nonblocking(false).unwrap();
             if let Err(e) = socket.connect(addr) {
                 return Err(e);
             }
             let mut rsi = RemoteServerInterface {
                 socket,
                 connection_state: Disconnected,
+                tick_info: None,
+                tick_lag: None,
                 my_player_id: None,
+                last_snapshot: None,
             };
             rsi.send(ClientMessage::ConnectionRequest);
             Ok(rsi)
@@ -76,10 +83,11 @@ impl ServerInterface for RemoteServerInterface {
             Connected => (),
             _ => return,
         }
-        self.socket.set_nonblocking(true).unwrap();
-        // TODO
+        if let Some(ref snapshot) = self.last_snapshot {
+            *model = snapshot.get_model().clone();
+        }
+        // TODO send input
         self.send(ClientMessage::EchoRequest(42));
-        self.socket.set_nonblocking(false).unwrap();
     }
 
     fn handle_traffic(&mut self, until: Instant) {
@@ -91,33 +99,39 @@ impl ServerInterface for RemoteServerInterface {
             }
             self.socket.set_read_timeout(Some(until - now)).unwrap();
             if let Some(msg) = self.recv() {
+                let now = Instant::now();
                 println!("{:?}", msg);
                 match msg {
-                    ConnectionConfirm(id) => self.my_player_id = Some(id),
+                    ConnectionConfirm(id) => {
+                        self.my_player_id = Some(id);
+                        self.connection_state = Connected;
+                    },
+                    Snapshot(new_snapshot) => {
+                        let replace = if let Some(ref last_snapshot) = self.last_snapshot {
+                            *last_snapshot < new_snapshot
+                        } else {
+                            true
+                        };
+                        if replace {
+                            self.tick_info = Some(TickInfo {
+                                tick: new_snapshot.get_tick(),
+                                tick_time: now,
+                            });
+                            self.last_snapshot = Some(new_snapshot)
+                        }
+                    },
                     _ => (), // TODO
                 }
             }
         }
     }
 
-    fn get_tick(&self) -> u64 {
-        // TODO
-        0
+    fn get_tick_info(&self) -> Option<TickInfo> {
+        self.tick_info
     }
 
-    fn get_predicted_tick(&self) -> u64 {
-        // TODO
-        0
-    }
-
-    fn get_intra_tick(&self) -> f64 {
-        // TODO
-        0.0
-    }
-
-    fn get_next_tick_time(&self) -> Instant {
-        // TODO
-        Instant::now() + Duration::from_secs(1)
+    fn get_tick_lag(&self) -> Option<u64> {
+        self.tick_lag
     }
 
     fn get_my_player_id(&self) -> Option<u64> {

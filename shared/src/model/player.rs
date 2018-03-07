@@ -1,3 +1,4 @@
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Player {
     name: String,
     character_id: Option<u64>,

@@ -14,7 +14,7 @@ use math::fixed_point::FixedPoint;
 
 // TODO consider using cgmath's vector struct instead
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct Vec3 {
     pub x: FixedPoint,
     pub y: FixedPoint,

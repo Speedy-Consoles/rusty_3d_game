@@ -1,4 +1,5 @@
 use std::io::Cursor;
+use std::cmp::Ordering;
 
 use bincode;
 use bincode::serialize_into;
@@ -36,9 +37,48 @@ pub enum ClientMessage {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct Snapshot {
+    tick: u64,
+    model: Model
+}
+
+impl Snapshot {
+    pub fn new(tick: u64, model: &Model) -> Snapshot {
+        Snapshot {
+            tick,
+            model: model.clone(),
+        }
+    }
+
+    pub fn get_tick(&self) -> u64 {
+        self.tick
+    }
+
+    pub fn get_model(&self) -> &Model {
+        &self.model
+    }
+}
+
+impl PartialEq for Snapshot {
+    fn eq(&self, other: &Snapshot) -> bool {
+        self.tick == other.tick
+    }
+}
+
+impl PartialOrd for Snapshot {
+    fn partial_cmp(&self, other: &Snapshot) -> Option<Ordering> {
+        if self.tick == other.tick {
+            None
+        } else {
+            Some(self.tick.cmp(&other.tick))
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     ConnectionConfirm(u64),
     EchoResponse(u64),
     Kick,
-    //SnapShot(Model),
+    Snapshot(Snapshot),
 }
