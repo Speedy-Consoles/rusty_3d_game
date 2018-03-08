@@ -139,7 +139,6 @@ impl Client {
             if before_draw >= next_draw_time {
                 if let Some(my_player_id) = self.server_interface.get_my_player_id() {
                     if let Some(tick_info) = self.server_interface.get_tick_info() {
-                        println!("{}", self.model.get_world().get_characters().len());
                         let view_dir = if self.config.direct_camera {
                             Some(self.character_input.view_dir)
                         } else {

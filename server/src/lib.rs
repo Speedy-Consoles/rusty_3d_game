@@ -53,6 +53,9 @@ impl Server {
 
         // main loop
         loop { // TODO add way to exit
+            // remove timed out clients
+            // TODO
+
             // tick
             for (id, client) in self.clients.iter_mut() {
                 if let Some(input) = client.inputs.remove(&self.tick) {

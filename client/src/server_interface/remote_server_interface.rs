@@ -137,13 +137,16 @@ impl RemoteServerInterface {
 impl ServerInterface for RemoteServerInterface {
     fn tick(&mut self, model: &mut Model, input: CharacterInput) {
         if let AfterSnapshot { start_tick_time, ref last_snapshot, .. } = self.internal_state {
-            // update tick
+            // update tick info
+            // TODO think of a better way to assure smooth time
             let diff = Instant::now() - start_tick_time;
             let tick = util::elapsed_ticks(diff, TICK_SPEED);
-            let tick_time = start_tick_time
+            let tick_time = Instant::now().min(
+                start_tick_time
                 + util::mult_duration(consts::tick_interval(), tick)
-                + consts::tick_time_tolerance();
-            let overwrite = if let Some(ref tick_info) = self.tick_info { // TODO maybe smoother?
+                + consts::tick_time_tolerance()
+            );
+            let overwrite = if let Some(ref tick_info) = self.tick_info {
                 tick_info.tick < tick
             } else {
                 true
