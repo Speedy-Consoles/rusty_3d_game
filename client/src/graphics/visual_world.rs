@@ -89,7 +89,7 @@ impl VisualWorld {
 
     pub fn rebuild(&mut self, my_character_id: Option<u64>,
                    current_world: &World, predicted_world: &World) {
-        self.characters.clear();
+        self.reset();
         for (&id, c) in  current_world.get_characters() {
             if Some(id) == my_character_id {
                 continue;
@@ -104,6 +104,7 @@ impl VisualWorld {
     }
 
     pub fn remix(&mut self, a: &VisualWorld, b: &VisualWorld, ratio: f32) {
+        self.reset();
         for (id, cb) in b.get_characters() {
             if let Some(ca) = a.get_characters().get(id) {
                 self.characters.insert(*id, ca.mix(cb, ratio));
@@ -119,5 +120,9 @@ impl VisualWorld {
 
     pub fn get_characters(&self) -> &HashMap<u64, VisualCharacter> {
         &self.characters
+    }
+
+    fn reset(&mut self) {
+        self.characters.clear();
     }
 }
