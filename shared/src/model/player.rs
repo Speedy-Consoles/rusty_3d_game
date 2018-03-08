@@ -16,11 +16,19 @@ impl Player {
         self.name = new_name;
     }
 
+    pub fn get_name(&mut self) -> &str {
+        self.name.as_str()
+    }
+
     pub fn set_character_id(&mut self, character_id: Option<u64>) {
         self.character_id = character_id;
     }
 
     pub fn get_character_id(&self) -> Option<u64> {
         self.character_id
+    }
+
+    pub fn take_name(self) -> String {
+        self.name
     }
 }

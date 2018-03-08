@@ -82,6 +82,13 @@ impl PartialOrd for Snapshot {
 pub enum ServerMessage {
     ConnectionConfirm(u64),
     EchoResponse(u64),
-    Kick,
+    PlayerDisconnect { id: u64, name: String, reason: DisconnectReason }, // TODO give string max length
     Snapshot(Snapshot),
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)] // TODO find a way to not make this Copy
+pub enum DisconnectReason {
+    Disconnected,
+    TimedOut,
+    Kicked,
 }

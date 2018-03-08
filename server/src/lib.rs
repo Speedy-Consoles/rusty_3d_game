@@ -14,11 +14,14 @@ use shared::net::ClientMessage;
 use shared::net::ServerMessage;
 use shared::net::Packable;
 use shared::net::Snapshot;
+use shared::net::DisconnectReason;
 use shared::net::MAX_MESSAGE_LENGTH;
 
 struct Client {
     addr: SocketAddr,
     inputs: HashMap<u64, CharacterInput>,
+    last_msg_time: Instant,
+    remove: Option<DisconnectReason>,
 }
 
 pub struct Server {
@@ -31,6 +34,8 @@ pub struct Server {
 
 impl Server {
     pub fn new() -> Server {
+        // TODO make protocol family configurable
+        // TODO perhaps use IpV4 AND ipV6 socket
         let addr = "[::]:51946";
         //let addr = "0.0.0.0:51946";
         Server {
@@ -53,8 +58,9 @@ impl Server {
 
         // main loop
         loop { // TODO add way to exit
-            // remove timed out clients
-            // TODO
+            // update clients
+            self.check_timeouts();
+            self.remove_clients();
 
             // tick
             for (id, client) in self.clients.iter_mut() {
@@ -83,6 +89,27 @@ impl Server {
         }
     }
 
+    fn check_timeouts(&mut self) {
+        let now = Instant::now();
+        for client in self.clients.values_mut() {
+            if now - client.last_msg_time > consts::time_out_delay() {
+                client.remove = Some(DisconnectReason::TimedOut);
+            }
+        }
+    }
+
+    fn remove_clients(&mut self) {
+        for (&id, client) in self.clients.iter() {
+            if let Some(reason) = client.remove {
+                let name = self.model.remove_player(id).unwrap().take_name();
+                let msg = ServerMessage::PlayerDisconnect { id, name, reason };
+                self.broadcast(msg);
+                self.clients_id_by_addr.remove(&client.addr).unwrap();
+            }
+        }
+        self.clients.retain(|_, client| client.remove.is_none());
+    }
+
     fn handle_traffic(&mut self, until: Instant) {
         loop {
             let now = Instant::now();
@@ -97,14 +124,23 @@ impl Server {
     }
 
     fn handle_message(&mut self, message: ClientMessage, src: SocketAddr) {
+        let recv_time = Instant::now();
         let id_option = self.clients_id_by_addr.get(&src).map(|id| *id);
+        if let Some(id) = id_option {
+            self.clients.get_mut(&id).unwrap().last_msg_time = recv_time;
+        }
         match message {
             ClientMessage::ConnectionRequest => {
                 if id_option.is_some() {
                     return;
                 }
                 let new_id = self.model.add_player(String::from("UnknownPlayer"));
-                self.clients.insert(new_id, Client { addr: src, inputs: HashMap::new() });
+                self.clients.insert(new_id, Client {
+                    addr: src,
+                    inputs: HashMap::new(),
+                    last_msg_time: recv_time,
+                    remove: None,
+                });
                 self.clients_id_by_addr.insert(src, new_id);
                 self.send_to(ServerMessage::ConnectionConfirm(new_id), src);
             },
@@ -122,27 +158,20 @@ impl Server {
             },
             ClientMessage::Leave => {
                 if let Some(id) = id_option {
-                    self.remove_client(id);
+                    self.clients.get_mut(&id).unwrap().remove
+                        = Some(DisconnectReason::Disconnected);
                 }
             },
         }
     }
 
-    fn remove_client(&mut self, id: u64) {
-        self.model.remove_player(id);
-        let client = self.clients.remove(&id).unwrap();
-        let msg = ServerMessage::Kick;
-        self.send_to(msg, client.addr);
-        self.clients_id_by_addr.remove(&client.addr).unwrap();
-    }
-
-    fn send_to(&mut self, msg: ServerMessage, dst: SocketAddr) {
+    fn send_to(&self, msg: ServerMessage, dst: SocketAddr) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let amount = msg.pack(&mut buf).unwrap();
         self.socket.send_to(&buf[..amount], dst).unwrap();
     }
 
-    fn broadcast(&mut self, msg: ServerMessage) {
+    fn broadcast(&self, msg: ServerMessage) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let amount = msg.pack(&mut buf).unwrap();
         for client in self.clients.values() {

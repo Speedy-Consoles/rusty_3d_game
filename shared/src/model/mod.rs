@@ -41,15 +41,15 @@ impl Model {
         id
     }
 
-    pub fn remove_player(&mut self, player_id: u64) {
-        match self.players.remove(&player_id) {
-            Some(player) => {
-                if let Some(character_id) = player.get_character_id() {
-                    self.world.remove_character(character_id);
-                }
-            },
-            None => println!("WARNING: Tried to remove non-existing player with id {}!", player_id),
+    pub fn remove_player(&mut self, player_id: u64) -> Option<Player> {
+        let mut result = self.players.remove(&player_id);
+        if let Some(ref mut player) = result {
+            if let Some(character_id) = player.get_character_id() {
+                self.world.remove_character(character_id);
+                player.set_character_id(None);
+            }
         }
+        result
     }
 
     pub fn get_player(&self, player_id: u64) -> Option<&Player> {

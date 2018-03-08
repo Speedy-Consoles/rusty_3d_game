@@ -11,6 +11,7 @@ use shared::net::ServerMessage;
 use shared::net::ClientMessage;
 use shared::net::Packable;
 use shared::net::Snapshot;
+use shared::net::DisconnectReason;
 use shared::net::MAX_MESSAGE_LENGTH;
 use shared::consts;
 use shared::consts::TICK_SPEED;
@@ -102,7 +103,25 @@ impl RemoteServerInterface {
                 my_player_id
             },
             Snapshot(s) => self.on_snapshot(s),
-            Kick => self.internal_state = Disconnected,
+            PlayerDisconnect { id, name, reason } => {
+                match self.internal_state {
+                    BeforeSnapshot { my_player_id }
+                    | AfterSnapshot { my_player_id, .. } if my_player_id == id => {
+                        if let DisconnectReason::Kicked = reason {
+                             println!("You were kicked.");
+                        }
+                        self.internal_state = Disconnected;
+                    },
+                    _ => {
+                        let reason_str = match reason {
+                            DisconnectReason::Disconnected => "left",
+                            DisconnectReason::TimedOut => "timed out",
+                            DisconnectReason::Kicked => "was kicked",
+                        };
+                        println!("{} {}.", name, reason_str);
+                    }
+                }
+            },
             EchoResponse(_) => (),
         }
     }
