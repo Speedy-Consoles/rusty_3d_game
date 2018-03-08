@@ -39,6 +39,6 @@ pub fn draw_interval() -> Duration { // TODO move to config, make const
 // prediction
 pub const MAX_PREDICT_TICKS: usize = 120;
 pub const NEWEST_TICK_TIME_WEIGHT: f64 = 0.2;
-pub fn tick_time_tolerance() -> Duration {
+pub fn tick_time_tolerance() -> Duration { // TODO make const
     Duration::new(0, 1_000_000)
 }

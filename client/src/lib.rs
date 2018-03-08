@@ -110,8 +110,8 @@ impl Client {
             self.handle_controls();
 
             // tick
-            let now = Instant::now();
-            if now >= next_tick_time {
+            let before_tick = Instant::now();
+            if before_tick >= next_tick_time {
                 let mut character_input = self.character_input;
                 if self.menu_active {
                     character_input = Default::default();
@@ -124,7 +124,7 @@ impl Client {
                     self.predict(tick_info.tick + 1, tick_lag);
                     next_tick_time = tick_info.tick_time + consts::tick_interval();
                 } else {
-                    next_tick_time = Instant::now() + consts::tick_interval();
+                    next_tick_time = before_tick + consts::tick_interval();
                 }
                 tick_counter += 1;
             }
@@ -135,8 +135,8 @@ impl Client {
             }
 
             // draw
-            let now = Instant::now();
-            if now >= next_draw_time {
+            let before_draw = Instant::now();
+            if before_draw >= next_draw_time {
                 if let Some(my_player_id) = self.server_interface.get_my_player_id() {
                     if let Some(tick_info) = self.server_interface.get_tick_info() {
                         let view_dir = if self.config.direct_camera {
@@ -153,11 +153,11 @@ impl Client {
                             tick_info.get_intra_tick(),
                             &self.display
                         );
+                        draw_counter += 1;
                     }
                 }
                 let draw_diff = util::elapsed_ticks(next_draw_time.elapsed(), DRAW_SPEED);
                 next_draw_time += util::mult_duration(consts::draw_interval(), draw_diff + 1);
-                draw_counter += 1;
             }
 
             // display rates
