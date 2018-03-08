@@ -69,7 +69,9 @@ impl RemoteServerInterface {
         let new_start_tick_time = Instant::now() - util::mult_duration(
             consts::tick_interval(),
             snapshot.get_tick()
-        );
+        ) + consts::tick_time_tolerance();
+        // this adds some extra delay in our ticks to make it likely
+        // that the next snapshot will be there on any tick
         match self.internal_state {
             Connecting | Disconnecting | Disconnected => (), // ignore snapshot
             BeforeSnapshot { my_player_id } => self.internal_state = AfterSnapshot {
@@ -135,17 +137,13 @@ impl RemoteServerInterface {
 }
 
 impl ServerInterface for RemoteServerInterface {
-    fn tick(&mut self, model: &mut Model, input: CharacterInput) {
+    fn tick(&mut self, model: &mut Model, input: CharacterInput) -> Instant {
         if let AfterSnapshot { start_tick_time, ref last_snapshot, .. } = self.internal_state {
             // update tick info
             // TODO think of a better way to assure smooth time
             let diff = Instant::now() - start_tick_time;
             let tick = util::elapsed_ticks(diff, TICK_SPEED);
-            let tick_time = Instant::now().min(
-                start_tick_time
-                + util::mult_duration(consts::tick_interval(), tick)
-                + consts::tick_time_tolerance()
-            );
+            let tick_time = start_tick_time + util::mult_duration(consts::tick_interval(), tick);
             let overwrite = if let Some(ref tick_info) = self.tick_info {
                 tick_info.tick < tick
             } else {
@@ -170,6 +168,10 @@ impl ServerInterface for RemoteServerInterface {
             for _ in last_snapshot.get_tick()..tick {
                 model.tick();
             }
+
+            tick_time + consts::tick_interval()
+        } else {
+            Instant::now() + consts::tick_interval()
         }
     }
 

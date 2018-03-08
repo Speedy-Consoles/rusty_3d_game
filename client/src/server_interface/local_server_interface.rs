@@ -29,9 +29,10 @@ impl LocalServerInterface {
 }
 
 impl ServerInterface for LocalServerInterface {
-    fn tick(&mut self, model: &mut Model, input: CharacterInput) {
+    fn tick(&mut self, model: &mut Model, input: CharacterInput) -> Instant {
         let now = Instant::now();
         let tick_diff;
+        let next_tick_time;
         if let Some(ref mut tick_info) = self.tick_info {
             let prev_tick = tick_info.tick;
             let diff = now - self.start_tick_time;
@@ -39,6 +40,7 @@ impl ServerInterface for LocalServerInterface {
             tick_info.tick_time = self.start_tick_time
                 + util::mult_duration(consts::tick_interval(), tick_info.tick);
             tick_diff = tick_info.tick - prev_tick;
+            next_tick_time = tick_info.tick_time + consts::tick_interval();
         } else {
             self.start_tick_time = now;
             self.tick_info = Some(TickInfo {
@@ -46,6 +48,7 @@ impl ServerInterface for LocalServerInterface {
                 tick_time: now,
             });
             tick_diff = 1;
+            next_tick_time = now + consts::tick_interval();
             self.my_player_id = Some(model.add_player(String::from("Player")));
         }
 
@@ -54,6 +57,8 @@ impl ServerInterface for LocalServerInterface {
             model.set_character_input(my_player_id, input);
             model.tick();
         }
+
+        next_tick_time
     }
 
     fn handle_traffic(&mut self, until: Instant) {

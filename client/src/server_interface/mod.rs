@@ -33,7 +33,7 @@ impl TickInfo {
 }
 
 pub trait ServerInterface {
-    fn tick(&mut self, model: &mut Model, input: CharacterInput);
+    fn tick(&mut self, model: &mut Model, input: CharacterInput) -> Instant;
     fn handle_traffic(&mut self, until: Instant);
     fn get_tick_info(&self) -> Option<TickInfo>;
     fn get_tick_lag(&self) -> u64;

@@ -117,14 +117,11 @@ impl Client {
                     character_input = Default::default();
                     character_input.view_dir = self.character_input.view_dir;
                 }
-                self.server_interface.tick(&mut self.model, character_input);
+                next_tick_time = self.server_interface.tick(&mut self.model, character_input);
                 self.character_input.reset_flags();
                 if let Some(tick_info) = self.server_interface.get_tick_info() {
                     let tick_lag = self.server_interface.get_tick_lag();
                     self.predict(tick_info.tick + 1, tick_lag);
-                    next_tick_time = tick_info.tick_time + consts::tick_interval();
-                } else {
-                    next_tick_time = before_tick + consts::tick_interval();
                 }
                 tick_counter += 1;
             }
