@@ -178,7 +178,7 @@ impl ServerInterface for RemoteServerInterface {
             }
 
             // send input
-            self.tick_lag = 50; // TODO use adaptive delay and prevent predicted tick decreasing
+            self.tick_lag = 20; // TODO use adaptive delay and prevent predicted tick decreasing
             let input_tick = tick + self.tick_lag;
             let msg = ClientMessage::Input { tick: input_tick, input };
             self.send(msg);

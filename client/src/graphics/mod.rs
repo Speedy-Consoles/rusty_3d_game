@@ -13,6 +13,7 @@ use glium::draw_parameters::Depth;
 use glium::draw_parameters::DrawParameters;
 use glium::vertex::EmptyVertexAttributes;
 use glium::index::NoIndices;
+use glium::index::PrimitiveType;
 use cgmath::Matrix4;
 use cgmath::SquareMatrix;
 use cgmath::Rad;
@@ -35,9 +36,13 @@ struct MyVertex {
 
 implement_vertex!(MyVertex, position);
 
-pub struct Graphics {
+struct VertexObject {
     vertex_buffer: glium::VertexBuffer<MyVertex>,
     index_buffer: glium::IndexBuffer<u32>,
+}
+
+pub struct Graphics {
+    character_head_vo: VertexObject,
     program: glium::program::Program,
     background_program: glium::program::Program,
     perspective_matrix: Matrix4<f32>,
@@ -66,37 +71,8 @@ impl Graphics {
             None
         ).unwrap();
 
-        // vertex buffer
-        let vertex_data = &[
-            MyVertex {
-                position: [0.5, -0.5, 0.2]
-            },
-            MyVertex {
-                position: [0.5,  0.5, 0.2]
-            },
-            MyVertex {
-                position: [0.5, -0.5, 1.2]
-            },
-            MyVertex {
-                position: [0.5,  0.5, 1.2]
-            },
-        ];
-        let vertex_buffer = glium::VertexBuffer::new(display, vertex_data).unwrap();
-
-        // index buffer
-        let index_data = &[
-            0u32, 3, 1,
-            0, 2, 3,
-        ];
-        let index_buffer = glium::IndexBuffer::new(
-            display,
-            glium::index::PrimitiveType::TrianglesList,
-            index_data
-        ).unwrap();
-
         Graphics {
-            vertex_buffer,
-            index_buffer,
+            character_head_vo: Self::build_character_head(display),
             program,
             background_program,
             perspective_matrix: Matrix4::identity(),
@@ -105,6 +81,57 @@ impl Graphics {
             last_visual_world: VisualWorld::new(),
             last_tick: 0,
             mix_world: VisualWorld::new(),
+        }
+    }
+
+    fn build_character_head(display: &Display) -> VertexObject {
+        let z = 0.1;
+        let width = 0.2;
+        let height = 0.3;
+        let depth = 0.2;
+
+        let left = width / 2.0;
+        let right = -width / 2.0;
+        let top = height / 2.0 + z;
+        let bottom = -height / 2.0 + z;
+        let front = depth / 2.0;
+        let back = -depth / 2.0;
+
+        let vertex_data = &[
+            MyVertex { position: [back,  left,  bottom] },
+            MyVertex { position: [back,  right, bottom] },
+            MyVertex { position: [back,  right, top] },
+            MyVertex { position: [back,  left,  top] },
+            MyVertex { position: [front, left,  bottom] },
+            MyVertex { position: [front, right, bottom] },
+            MyVertex { position: [front, right, top] },
+            MyVertex { position: [front, left,  top] },
+        ];
+        let vertex_buffer = glium::VertexBuffer::new(display, vertex_data).unwrap();
+
+        let index_data = &[
+            0, 1, 2,
+            0, 2, 3,
+            1, 5, 6,
+            1, 6, 2,
+            5, 4, 7,
+            5, 7, 6,
+            4, 0, 3,
+            4, 3, 7,
+            0, 4, 5,
+            0, 5, 1,
+            3, 2, 6,
+            3, 6, 7u32,
+        ];
+        let index_buffer = glium::IndexBuffer::new(
+            display,
+            PrimitiveType::TrianglesList,
+            index_data
+        ).unwrap();
+
+        VertexObject {
+            vertex_buffer,
+            index_buffer,
         }
     }
 
@@ -173,7 +200,7 @@ impl Graphics {
 
         frame.draw(
             EmptyVertexAttributes {len: 4},
-            &NoIndices(glium::index::PrimitiveType::TriangleStrip),
+            &NoIndices(PrimitiveType::TriangleStrip),
             &self.background_program,
             &background_uniforms,
             &Default::default(),
@@ -182,15 +209,21 @@ impl Graphics {
 
     fn draw_character(&self, character: &VisualCharacter,
                       frame: &mut Frame, world_to_screen_matrix: &Matrix4<f32>) {
-        // object cs to global cs
-        let object_matrix = Matrix4::from_translation(character.get_pos().into());
+        // character cs to world cs
+        let character_to_world_matrix = Matrix4::from_translation(character.get_pos().into());
+        // head cs to world cs
+        let head_to_world_matrix = character_to_world_matrix
+            * Matrix4::from_angle_z(Rad(character.get_yaw() as f32))
+            * Matrix4::from_angle_y(Rad(-character.get_pitch() as f32));
 
-        // object cs to screen cs
-        let object_to_screen_matrix = world_to_screen_matrix * object_matrix;
+        // character cs to screen cs
+        let character_to_screen_matrix = world_to_screen_matrix * character_to_world_matrix;
+        // head cs to screen cs
+        let head_to_screen_matrix = world_to_screen_matrix * head_to_world_matrix;
 
         // uniforms
-        let object_to_screen_matrix_uniform: [[f32; 4]; 4] = object_to_screen_matrix.into();
-        let uniforms = uniform! { trafo_matrix: object_to_screen_matrix_uniform };
+        let head_to_screen_matrix_uniform: [[f32; 4]; 4] = head_to_screen_matrix.into();
+        let uniforms = uniform! { trafo_matrix: head_to_screen_matrix_uniform };
 
         // draw parameters
         let draw_parameters = DrawParameters {
@@ -202,8 +235,8 @@ impl Graphics {
             ..Default::default()
         };
         frame.draw(
-            &self.vertex_buffer,
-            &self.index_buffer,
+            &self.character_head_vo.vertex_buffer,
+            &self.character_head_vo.index_buffer,
             &self.program,
             &uniforms,
             &draw_parameters,
