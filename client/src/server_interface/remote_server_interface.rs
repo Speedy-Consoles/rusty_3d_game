@@ -28,7 +28,7 @@ enum InternalState {
     AfterSnapshot {
         my_player_id: u64,
         start_tick_time: Instant,
-        last_snapshot: Snapshot,
+        last_snapshot: Snapshot, // TODO store multiple snapshots so we can catch up without predicting
     },
     Disconnecting,
     Disconnected,
@@ -154,10 +154,12 @@ impl ServerInterface for RemoteServerInterface {
                     tick,
                     tick_time,
                 });
+            } else {
+                println!("WARNING: No tick increase");
             }
 
             // send input
-            self.tick_lag = 50; // TODO use realistic delay
+            self.tick_lag = 50; // TODO use adaptive delay and prevent predicted tick decreasing
             let input_tick = tick + self.tick_lag;
             let msg = ClientMessage::Input { tick: input_tick, input };
             self.send(msg);
@@ -167,6 +169,11 @@ impl ServerInterface for RemoteServerInterface {
             *model = last_snapshot.get_model().clone(); // TODO do this better
             for _ in last_snapshot.get_tick()..tick {
                 model.tick();
+            }
+
+            if tick > last_snapshot.get_tick() {
+                println!("WARNING: {} ticks ahead of last snapshot!",
+                         tick - last_snapshot.get_tick());
             }
 
             tick_time + consts::tick_interval()
