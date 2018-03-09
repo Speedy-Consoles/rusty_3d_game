@@ -25,7 +25,6 @@ struct Client {
     addr: SocketAddr,
     inputs: HashMap<u64, CharacterInput>,
     last_msg_time: Instant,
-    remove: Option<DisconnectReason>,
 }
 
 pub struct Server {
@@ -34,6 +33,7 @@ pub struct Server {
     tick: u64,
     clients: HashMap<u64, Client>,
     clients_id_by_addr: HashMap<SocketAddr, u64>,
+    to_remove_clients: HashMap<u64, DisconnectReason>,
 }
 
 impl Server {
@@ -46,6 +46,7 @@ impl Server {
             tick: 0,
             clients: HashMap::new(),
             clients_id_by_addr: HashMap::new(),
+            to_remove_clients: HashMap::new(),
         }
     }
 
@@ -93,24 +94,23 @@ impl Server {
 
     fn check_timeouts(&mut self) {
         let now = Instant::now();
-        for client in self.clients.values_mut() {
+        for (id, client) in self.clients.iter() {
             if now - client.last_msg_time > consts::time_out_delay() {
-                client.remove = Some(DisconnectReason::TimedOut);
+                self.to_remove_clients.insert(*id, DisconnectReason::TimedOut);
             }
         }
     }
 
     fn remove_clients(&mut self) {
-        // TODO don't send any messages after the disconnect message
-        for (&id, client) in self.clients.iter() {
-            if let Some(reason) = client.remove {
-                let name = self.model.remove_player(id).unwrap().take_name();
-                let msg = ServerMessage::PlayerDisconnect { id, name, reason };
-                self.broadcast(msg);
-                self.clients_id_by_addr.remove(&client.addr).unwrap();
-            }
+        // TODO find a way to move the reason instead of copying it
+        for (&id, &reason) in self.to_remove_clients.iter() {
+            let name = self.model.remove_player(id).unwrap().take_name();
+            let msg = ServerMessage::PlayerDisconnect { id, name, reason };
+            self.broadcast(msg);
+            let client = self.clients.remove(&id).unwrap();
+            self.clients_id_by_addr.remove(&client.addr).unwrap();
         }
-        self.clients.retain(|_, client| client.remove.is_none());
+        self.to_remove_clients.clear();
     }
 
     fn handle_traffic(&mut self, until: Instant) {
@@ -142,7 +142,6 @@ impl Server {
                     addr: src,
                     inputs: HashMap::new(),
                     last_msg_time: recv_time,
-                    remove: None,
                 });
                 self.clients_id_by_addr.insert(src, new_id);
                 self.send_to(ServerMessage::ConnectionConfirm(new_id), src);
@@ -161,8 +160,7 @@ impl Server {
             },
             ClientMessage::Leave => {
                 if let Some(id) = id_option {
-                    self.clients.get_mut(&id).unwrap().remove
-                        = Some(DisconnectReason::Disconnected);
+                    self.to_remove_clients.insert(id, DisconnectReason::Disconnected);
                 }
             },
         }
