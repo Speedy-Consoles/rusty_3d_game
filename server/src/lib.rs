@@ -1,3 +1,5 @@
+extern crate net2;
+
 extern crate shared;
 
 use std::time::Instant;
@@ -5,6 +7,8 @@ use std::net::UdpSocket;
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::io::ErrorKind;
+
+use net2::UdpBuilder;
 
 use shared::util;
 use shared::consts;
@@ -34,12 +38,10 @@ pub struct Server {
 
 impl Server {
     pub fn new() -> Server {
-        // TODO make protocol family configurable
-        // TODO perhaps use IpV4 AND ipV6 socket
-        let addr = "[::]:51946";
-        //let addr = "0.0.0.0:51946";
         Server {
-            socket: UdpSocket::bind(addr).unwrap(),
+            socket: UdpBuilder::new_v6().unwrap()
+                .only_v6(false).unwrap()
+                .bind(("::", 51946)).unwrap(),
             model: Model::new(),
             tick: 0,
             clients: HashMap::new(),
@@ -99,6 +101,7 @@ impl Server {
     }
 
     fn remove_clients(&mut self) {
+        // TODO don't send any messages after the disconnect message
         for (&id, client) in self.clients.iter() {
             if let Some(reason) = client.remove {
                 let name = self.model.remove_player(id).unwrap().take_name();

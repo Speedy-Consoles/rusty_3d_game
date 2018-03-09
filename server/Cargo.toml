@@ -5,3 +5,4 @@ authors = ["Speedy Consoles <rubihome@gmx.de>"]
 
 [dependencies]
 shared = { path = "../shared" }
+net2 = "0.2.32"
