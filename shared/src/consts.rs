@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 
 // ticks
 pub const TICK_SPEED: u32 = 120;
-pub fn tick_interval() -> Duration {
+pub fn tick_duration() -> Duration {
     Duration::from_secs(1) / TICK_SPEED
 }
 

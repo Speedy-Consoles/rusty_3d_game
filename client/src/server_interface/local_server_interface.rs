@@ -2,63 +2,71 @@ use std::time::Instant;
 use std::thread;
 
 use shared::consts;
-use shared::consts::TICK_SPEED;
 use shared::util;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 
 use super::ConnectionState;
-use super::ConnectionState::*;
 use super::ServerInterface;
 use super::TickInfo;
+use self::InternalState::*;
 
+enum InternalState {
+    BeforeFirstTick,
+    AfterFirstTick {
+        start_tick_time: Instant,
+        my_player_id: u64,
+        tick_info: TickInfo,
+    },
+    AfterDisconnect,
+}
 pub struct LocalServerInterface {
-    start_tick_time: Instant,
-    tick_info: Option<TickInfo>,
-    my_player_id: Option<u64>,
+    internal_state: InternalState,
 }
 
 impl LocalServerInterface {
     pub fn new() -> LocalServerInterface {
         LocalServerInterface {
-            start_tick_time: Instant::now(),
-            tick_info: None,
-            my_player_id: None,
+            internal_state: BeforeFirstTick,
         }
     }
 }
 
 impl ServerInterface for LocalServerInterface {
-    fn tick(&mut self, model: &mut Model, input: CharacterInput) -> Instant {
-        let now = Instant::now();
+    fn tick(&mut self, model: &mut Model, input: CharacterInput) {
         let tick_diff;
-        let next_tick_time;
-        if let Some(ref mut tick_info) = self.tick_info {
-            let prev_tick = tick_info.tick;
-            let diff = now - self.start_tick_time;
-            tick_info.tick = util::elapsed_ticks(diff, TICK_SPEED);
-            tick_info.tick_time = self.start_tick_time
-                + util::mult_duration(consts::tick_interval(), tick_info.tick);
-            tick_diff = tick_info.tick - prev_tick;
-            next_tick_time = tick_info.tick_time + consts::tick_interval();
-        } else {
-            self.start_tick_time = now;
-            self.tick_info = Some(TickInfo {
-                tick: 0,
-                tick_time: now,
-            });
-            tick_diff = 1;
-            next_tick_time = now + consts::tick_interval();
-            self.my_player_id = Some(model.add_player(String::from("Player")));
+        let player_id;
+        match self.internal_state {
+            BeforeFirstTick => {
+                player_id = model.add_player(String::from("Player"));
+                tick_diff = 1;
+                let now = Instant::now();
+                self.internal_state = AfterFirstTick {
+                    start_tick_time: now,
+                    my_player_id: player_id,
+                    tick_info: TickInfo {
+                        tick: 0,
+                        predicted_tick: 0,
+                        next_tick_time: now + consts::tick_duration(),
+                    }
+                };
+            },
+            AfterFirstTick { start_tick_time, my_player_id, ref mut tick_info } => {
+                player_id = my_player_id;
+                let prev_tick = tick_info.tick;
+                tick_info.tick += 1; // TODO allow tick skipping
+                tick_info.predicted_tick = tick_info.tick;
+                tick_info.next_tick_time = start_tick_time
+                    + util::mult_duration(consts::tick_duration(), tick_info.tick + 1);
+                tick_diff = tick_info.tick - prev_tick;
+            },
+            AfterDisconnect => return,
         }
 
-        let my_player_id = self.my_player_id.unwrap();
         for _ in 0..tick_diff {
-            model.set_character_input(my_player_id, input);
+            model.set_character_input(player_id, input);
             model.tick();
         }
-
-        next_tick_time
     }
 
     fn handle_traffic(&mut self, until: Instant) {
@@ -71,27 +79,20 @@ impl ServerInterface for LocalServerInterface {
         }
     }
 
-    fn get_tick_info(&self) -> Option<TickInfo> {
-        self.tick_info
-    }
-
-    fn get_tick_lag(&self) -> u64 {
-        0
-    }
-
-    fn get_my_player_id(&self) -> Option<u64> {
-        self.my_player_id
+    fn get_connection_state(&self) -> ConnectionState {
+        match self.internal_state {
+            BeforeFirstTick => ConnectionState::Connecting,
+            AfterFirstTick { my_player_id, tick_info, .. }
+            => ConnectionState::Connected { my_player_id, tick_info },
+            AfterDisconnect => ConnectionState::Disconnected,
+        }
     }
 
     fn get_character_input(&self, _tick: u64) -> Option<CharacterInput> {
         None
     }
 
-    fn get_connection_state(&self) -> ConnectionState {
-        Connected
-    }
-
     fn disconnect(&mut self) {
-        // TODO
+        self.internal_state = AfterDisconnect
     }
 }

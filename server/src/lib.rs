@@ -75,7 +75,7 @@ impl Server {
             let snapshot = ServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
             self.broadcast(snapshot);
             next_tick_time = start_tick_time
-                    + util::mult_duration(consts::tick_interval(), self.tick);
+                    + util::mult_duration(consts::tick_duration(), self.tick);
             tick_counter += 1;
 
             // display tick rate
