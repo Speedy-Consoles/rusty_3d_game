@@ -1,4 +1,5 @@
 use std::time::Instant;
+use std::time::Duration;
 use std::io;
 use std::net::SocketAddr;
 use std::net::UdpSocket;
@@ -25,11 +26,47 @@ use super::TickInfo;
 use self::InternalState::*;
 use self::SnapshotState::*;
 
+struct Network {
+    socket: UdpSocket,
+}
+
+impl Network {
+    fn send(&self, msg: ClientMessage) {
+        let mut buf = [0; MAX_MESSAGE_LENGTH];
+        let amount = msg.pack(&mut buf).unwrap();
+        self.socket.send(&buf[..amount]).unwrap();
+    }
+
+    fn recv(&self, read_time_out: Option<Duration>) -> Option<ServerMessage> {
+        self.socket.set_read_timeout(read_time_out).unwrap();
+        let mut buf = [0; MAX_MESSAGE_LENGTH];
+        match self.socket.recv(&mut buf) {
+            Ok(amount) => {
+                match ServerMessage::unpack(&buf[..amount]) {
+                    Ok(msg) => Some(msg),
+                    Err(e) => {
+                        println!("{:?}", e);
+                        None
+                    },
+                }
+            },
+            Err(e) => {
+                match e.kind() {
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut => (),
+                    _ => println!("{:?}", e),
+                };
+                None
+            }
+        }
+    }
+}
+
 enum SnapshotState {
     BeforeSnapshot,
     AfterSnapshot {
         start_tick_time: Instant,
         snapshots: HashMap<u64, Snapshot>,
+        sent_inputs: HashMap<u64, CharacterInput>,
         oldest_snapshot_tick: u64,
         tick_info: TickInfo,
     }
@@ -46,9 +83,8 @@ enum InternalState {
 }
 
 pub struct RemoteServerInterface {
-    socket: UdpSocket,
     internal_state: InternalState,
-    sent_inputs: HashMap<u64, CharacterInput>,
+    network: Network
 }
 
 impl RemoteServerInterface {
@@ -62,12 +98,14 @@ impl RemoteServerInterface {
             if let Err(e) = socket.connect(addr) {
                 return Err(e);
             }
-            let rsi = RemoteServerInterface {
+            let network = Network {
                 socket,
-                internal_state: Connecting,
-                sent_inputs: HashMap::new(),
             };
-            rsi.send(ClientMessage::ConnectionRequest);
+            network.send(ClientMessage::ConnectionRequest);
+            let rsi = RemoteServerInterface {
+                network,
+                internal_state: Connecting,
+            };
             Ok(rsi)
         })
     }
@@ -92,6 +130,7 @@ impl RemoteServerInterface {
                     },
                     oldest_snapshot_tick: snapshot.get_tick(),
                     snapshots: iter::once((snapshot.get_tick(), snapshot)).collect(),
+                    sent_inputs: HashMap::new(),
                 },
                 &mut AfterSnapshot {
                     ref mut start_tick_time,
@@ -142,47 +181,20 @@ impl RemoteServerInterface {
             EchoResponse(_) => (),
         }
     }
-
-    fn send(&self, msg: ClientMessage) {
-        let mut buf = [0; MAX_MESSAGE_LENGTH];
-        let amount = msg.pack(&mut buf).unwrap();
-        self.socket.send(&buf[..amount]).unwrap();
-    }
-
-    fn recv(&self) -> Option<ServerMessage> {
-        let mut buf = [0; MAX_MESSAGE_LENGTH];
-        match self.socket.recv(&mut buf) {
-            Ok(amount) => {
-                match ServerMessage::unpack(&buf[..amount]) {
-                    Ok(msg) => Some(msg),
-                    Err(e) => {
-                        println!("{:?}", e);
-                        None
-                    },
-                }
-            },
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::WouldBlock | ErrorKind::TimedOut => (),
-                    _ => println!("{:?}", e),
-                };
-                None
-            }
-        }
-    }
 }
 
 impl ServerInterface for RemoteServerInterface {
     fn tick(&mut self, model: &mut Model, character_input: CharacterInput) {
         let tick_lag = 20;// TODO use adaptive delay and prevent predicted tick decreasing
         if let Connected {
+            my_player_id,
             snapshot_state: AfterSnapshot {
                 start_tick_time,
                 ref mut tick_info,
                 ref mut oldest_snapshot_tick,
                 ref mut snapshots,
+                ref mut sent_inputs,
             },
-            ..
         } = self.internal_state {
             tick_info.tick_time = tick_info.next_tick_time;
             let target_float_tick = util::elapsed_ticks_float(
@@ -230,36 +242,26 @@ impl ServerInterface for RemoteServerInterface {
                     snapshots.remove(&t);
                 }
                 for t in (*oldest_snapshot_tick + 1)..(new_oldest_snapshot_tick + 1) {
-                    self.sent_inputs.remove(&t);
+                    sent_inputs.remove(&t);
                 }
                 *oldest_snapshot_tick = new_oldest_snapshot_tick;
             }
-        }
 
-        if let Connected {
-            snapshot_state: AfterSnapshot {
-                ref tick_info,
-                ref snapshots,
-                oldest_snapshot_tick,
-                ..
-            },
-            my_player_id,
-        } = self.internal_state {
             // send input
             let input_tick = tick_info.predicted_tick;
             let msg = ClientMessage::Input { tick: input_tick, input: character_input };
-            self.send(msg);
-            self.sent_inputs.insert(input_tick, character_input);
+            self.network.send(msg);
+            sent_inputs.insert(input_tick, character_input);
 
             // update model
-            let oldest_snapshot = snapshots.get(&oldest_snapshot_tick).unwrap();
+            let oldest_snapshot = snapshots.get(oldest_snapshot_tick).unwrap();
             *model = oldest_snapshot.get_model().clone(); // TODO do this better
-            let tick_diff = tick_info.tick - oldest_snapshot_tick;
+            let tick_diff = tick_info.tick - *oldest_snapshot_tick;
             if tick_diff > 0 {
                 println!("WARNING: {} ticks ahead of snapshot!", tick_diff);
             }
-            for tick in (oldest_snapshot_tick + 1)..(tick_info.tick + 1) {
-                if let Some(input) = self.sent_inputs.get(&tick) {
+            for tick in (*oldest_snapshot_tick + 1)..(tick_info.tick + 1) {
+                if let Some(input) = sent_inputs.get(&tick) {
                     model.set_character_input(my_player_id, *input);
                 }
                 model.tick();
@@ -273,8 +275,7 @@ impl ServerInterface for RemoteServerInterface {
             if until <= now {
                 break;
             }
-            self.socket.set_read_timeout(Some(until - now)).unwrap();
-            if let Some(msg) = self.recv() {
+            if let Some(msg) = self.network.recv(Some(until - now)) {
                 self.handle_message(msg);
             }
         }
@@ -292,11 +293,18 @@ impl ServerInterface for RemoteServerInterface {
     }
 
     fn get_character_input(&self, tick: u64) -> Option<CharacterInput> {
-        self.sent_inputs.get(&tick).map(|input| *input)
+        if let Connected {
+            snapshot_state: AfterSnapshot { ref sent_inputs, .. },
+            ..
+        } = self.internal_state {
+            sent_inputs.get(&tick).map(|input| *input)
+        } else {
+            None
+        }
     }
 
     fn disconnect(&mut self) {
-        self.send(ClientMessage::Leave);
+        self.network.send(ClientMessage::Leave);
         self.internal_state = Disconnecting;
     }
 }
