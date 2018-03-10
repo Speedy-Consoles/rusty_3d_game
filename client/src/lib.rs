@@ -100,7 +100,6 @@ impl Client {
 
         // for sleep timing
         let mut next_draw_time = Instant::now();
-        let mut last_tick_time = Instant::now();
         let mut next_tick_time = Instant::now();
 
         // main loop
@@ -112,7 +111,6 @@ impl Client {
             // tick
             let before_tick = Instant::now();
             if before_tick >= next_tick_time {
-                last_tick_time = next_tick_time;
                 let mut character_input = self.character_input;
                 if self.menu_active {
                     character_input = Default::default();
@@ -152,7 +150,7 @@ impl Client {
                         my_player_id,
                         view_dir,
                         tick_info.tick,
-                        util::intra_tick(last_tick_time, next_tick_time),
+                        util::intra_tick(tick_info.tick_time, tick_info.next_tick_time),
                         &self.display
                     );
                     draw_counter += 1;

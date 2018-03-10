@@ -24,6 +24,7 @@ pub enum ConnectionState {
 pub struct TickInfo {
     pub tick: u64,
     pub predicted_tick: u64,
+    pub tick_time: Instant,
     pub next_tick_time: Instant,
 }
 

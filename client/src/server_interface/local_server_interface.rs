@@ -46,6 +46,7 @@ impl ServerInterface for LocalServerInterface {
                     my_player_id: player_id,
                     tick_info: TickInfo {
                         tick: 0,
+                        tick_time: now,
                         predicted_tick: 0,
                         next_tick_time: now + consts::tick_duration(),
                     }
@@ -56,6 +57,7 @@ impl ServerInterface for LocalServerInterface {
                 let prev_tick = tick_info.tick;
                 tick_info.tick += 1; // TODO allow tick skipping
                 tick_info.predicted_tick = tick_info.tick;
+                tick_info.tick_time = tick_info.next_tick_time;
                 tick_info.next_tick_time = start_tick_time
                     + util::mult_duration(consts::tick_duration(), tick_info.tick + 1);
                 tick_diff = tick_info.tick - prev_tick;
