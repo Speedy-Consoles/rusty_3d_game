@@ -186,7 +186,7 @@ impl ServerInterface for RemoteServerInterface {
         } = self.internal_state {
             tick_info.tick_time = tick_info.next_tick_time;
             let target_float_tick = util::elapsed_ticks_float(
-                tick_info.next_tick_time - start_tick_time,
+                tick_info.tick_time - start_tick_time,
                 TICK_SPEED
             );
             let float_tick = (tick_info.tick + 1) as f64;
@@ -194,26 +194,28 @@ impl ServerInterface for RemoteServerInterface {
             let param1 = TICK_SPEED as f64 / 4.0;
             let param2 = TICK_SPEED as f64 / 4.0;
             let param3 = 0.2;
+            let duration_factor;
             if float_tick_diff < 0.0 {
+                println!("slowing down... ");
                 tick_info.tick += 1;
-                tick_info.next_tick_time = tick_info.tick_time + util::mult_duration_float(
-                    consts::tick_duration(),
-                    (-float_tick_diff / param1 + 1.0).min(2.0),
-                );
+                duration_factor = (-float_tick_diff / param1 + 1.0).min(2.0);
             } else if float_tick_diff <= param2 {
+                println!("catching up...");
                 tick_info.tick += 1;
-                tick_info.next_tick_time = tick_info.tick_time + util::mult_duration_float(
-                    consts::tick_duration(),
-                    1.0 - float_tick_diff / param2 * param3,
-                );
+                duration_factor = 1.0 - float_tick_diff / param2 * param3;
             } else {
                 println!("WARNING: Jumping from {} to {}!",
                      tick_info.tick,
                      target_float_tick as u64
                 );
                 tick_info.tick = target_float_tick as u64;
-                tick_info.next_tick_time = tick_info.tick_time + consts::tick_duration();
+                duration_factor = 1.0
             }
+            tick_info.next_tick_time = tick_info.tick_time + util::mult_duration_float(
+                consts::tick_duration(),
+                duration_factor,
+            );
+            println!("duration_factor: {}", duration_factor);
             tick_info.predicted_tick = tick_info.tick + tick_lag;
 
             // remove old snapshots and inputs
