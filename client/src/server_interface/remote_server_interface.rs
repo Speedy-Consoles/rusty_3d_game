@@ -204,7 +204,7 @@ impl ServerInterface for RemoteServerInterface {
                 tick_info.tick += 1;
                 tick_info.next_tick_time = tick_info.tick_time + util::mult_duration_float(
                     consts::tick_duration(),
-                    1.0 - float_tick_diff / param2 / param3,
+                    1.0 - float_tick_diff / param2 * param3,
                 );
             } else {
                 println!("WARNING: Jumping from {} to {}!",
