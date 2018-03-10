@@ -60,7 +60,7 @@ impl Graphics {
             display,
             &Self::load_shader_source("shader_src/vertex_shader.vert"),
             &Self::load_shader_source("shader_src/fragment_shader.frag"),
-            None
+            Some(&Self::load_shader_source("shader_src/geometry_shader.geo")),
         ).unwrap();
 
         // background program
@@ -195,8 +195,11 @@ impl Graphics {
     }
 
     fn draw_background(&self, frame: &mut Frame, world_to_screen_matrix: &Matrix4<f32>) {
-        let screen_to_world_matrix_uniform: [[f32; 4]; 4] = world_to_screen_matrix.invert().unwrap().into();
-        let background_uniforms = uniform! { trafo_matrix: screen_to_world_matrix_uniform };
+        let screen_to_world_matrix_uniform: [[f32; 4]; 4]
+            = world_to_screen_matrix.invert().unwrap().into();
+        let background_uniforms = uniform! {
+            screen_to_world_matrix: screen_to_world_matrix_uniform
+        };
 
         frame.draw(
             EmptyVertexAttributes {len: 4},
@@ -222,8 +225,15 @@ impl Graphics {
         let head_to_screen_matrix = world_to_screen_matrix * head_to_world_matrix;
 
         // uniforms
-        let head_to_screen_matrix_uniform: [[f32; 4]; 4] = head_to_screen_matrix.into();
-        let uniforms = uniform! { trafo_matrix: head_to_screen_matrix_uniform };
+        let head_to_world_matrix_uniform: [[f32; 4]; 4] = head_to_world_matrix.into();
+        let world_to_screen_matrix_uniform: [[f32; 4]; 4] = (*world_to_screen_matrix).into();
+        let uniforms = uniform! {
+            object_to_world_matrix:      head_to_world_matrix_uniform,
+            world_to_screen_matrix:      world_to_screen_matrix_uniform,
+            ambient_light_color:         [0.5, 0.5, 0.5f32],
+            directional_light_dir:       [1.0, 2.0, 3.0f32],
+            directional_light_color:     [0.5, 0.5, 0.5f32],
+        };
 
         // draw parameters
         let draw_parameters = DrawParameters {

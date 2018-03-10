@@ -1,6 +1,4 @@
-#version 140
-
-uniform mat4 trafo_matrix;
+#version 400
 
 const vec2 quad_vertices_sym[4] = vec2[4](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0));
 
