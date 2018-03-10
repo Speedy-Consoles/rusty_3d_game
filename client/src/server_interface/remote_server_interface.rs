@@ -84,11 +84,11 @@ impl RemoteServerInterface {
             match snapshot_state {
                 &mut BeforeSnapshot => *snapshot_state = AfterSnapshot {
                     start_tick_time: new_start_tick_time,
-                    tick_info: TickInfo {
+                    tick_info: TickInfo { // not a real tick info :/ but we need one
                         tick: snapshot.get_tick(),
                         predicted_tick: snapshot.get_tick(),
                         tick_time: recv_time,
-                        next_tick_time: recv_time + consts::tick_duration(),
+                        next_tick_time: recv_time, // must not lie in the future
                     },
                     oldest_snapshot_tick: snapshot.get_tick(),
                     snapshots: iter::once((snapshot.get_tick(), snapshot)).collect(),
@@ -196,11 +196,9 @@ impl ServerInterface for RemoteServerInterface {
             let param3 = 0.2;
             let duration_factor;
             if float_tick_diff < 0.0 {
-                println!("slowing down... ");
                 tick_info.tick += 1;
                 duration_factor = (-float_tick_diff / param1 + 1.0).min(2.0);
             } else if float_tick_diff <= param2 {
-                println!("catching up...");
                 tick_info.tick += 1;
                 duration_factor = 1.0 - float_tick_diff / param2 * param3;
             } else {
@@ -215,7 +213,6 @@ impl ServerInterface for RemoteServerInterface {
                 consts::tick_duration(),
                 duration_factor,
             );
-            println!("duration_factor: {}", duration_factor);
             tick_info.predicted_tick = tick_info.tick + tick_lag;
 
             // remove old snapshots and inputs
