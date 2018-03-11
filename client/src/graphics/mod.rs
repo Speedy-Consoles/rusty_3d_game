@@ -202,7 +202,7 @@ impl Graphics {
         };
 
         frame.draw(
-            EmptyVertexAttributes {len: 4},
+            EmptyVertexAttributes { len: 4 },
             &NoIndices(PrimitiveType::TriangleStrip),
             &self.background_program,
             &background_uniforms,

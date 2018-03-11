@@ -175,8 +175,6 @@ impl RemoteServerInterface {
                         snapshots.insert(snapshot.get_tick(), snapshot);
                     } else {
                         println!("WARNING: Discarded snapshot {}!", snapshot.get_tick());
-                        use std;
-                        std::process::exit(0);
                     }
                 },
             }
