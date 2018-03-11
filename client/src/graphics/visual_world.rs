@@ -3,28 +3,9 @@ use std::collections::HashMap;
 
 use cgmath::Vector3;
 
+use shared::util::Mix;
 use shared::model::world::World;
 use shared::model::world::character::Character;
-
-pub trait Mix {
-    fn mix(&self, other: &Self, ratio: f32) -> Self;
-}
-
-impl Mix for f32 {
-    fn mix(&self, other: &f32, ratio: f32) -> Self {
-        *self * (1.0 - ratio) + *other * ratio
-    }
-}
-
-impl Mix for Vector3<f32> {
-    fn mix(&self, other: &Self, ratio: f32) -> Self {
-        Vector3::new(
-            self.x.mix(&other.x, ratio),
-            self.y.mix(&other.y, ratio),
-            self.z.mix(&other.z, ratio)
-        )
-    }
-}
 
 #[derive(Clone)]
 pub struct VisualCharacter {
@@ -59,7 +40,7 @@ impl VisualCharacter {
 }
 
 impl Mix for VisualCharacter {
-    fn mix(&self, other: &Self, ratio: f32) -> Self {
+    fn mix(&self, other: &Self, ratio: f64) -> Self {
         let yaw_diff = self.yaw - other.yaw;
         let mut oy = other.yaw;
         if yaw_diff > PI {
@@ -103,7 +84,7 @@ impl VisualWorld {
         }
     }
 
-    pub fn remix(&mut self, a: &VisualWorld, b: &VisualWorld, ratio: f32) {
+    pub fn remix(&mut self, a: &VisualWorld, b: &VisualWorld, ratio: f64) {
         self.reset();
         for (id, cb) in b.get_characters() {
             if let Some(ca) = a.get_characters().get(id) {

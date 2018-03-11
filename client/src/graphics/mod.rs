@@ -147,11 +147,11 @@ impl Graphics {
         self.current_tick = tick;
         self.current_visual_world.rebuild(my_character_id, current_world, predicted_world);
 
-        let tick_diff = (self.current_tick - self.last_tick) as f32;
+        let tick_diff = (self.current_tick - self.last_tick) as f64;
         self.mix_world.remix(
             &self.current_visual_world,
             &self.last_visual_world,
-            (tick_diff - 1.0 + intra_tick as f32) / tick_diff
+            (tick_diff - 1.0 + intra_tick) / tick_diff
         );
 
         let character = if let Some(c) = my_character_id.and_then(|id|
@@ -219,20 +219,15 @@ impl Graphics {
             * Matrix4::from_angle_z(Rad(character.get_yaw() as f32))
             * Matrix4::from_angle_y(Rad(-character.get_pitch() as f32));
 
-        // character cs to screen cs
-        let character_to_screen_matrix = world_to_screen_matrix * character_to_world_matrix;
-        // head cs to screen cs
-        let head_to_screen_matrix = world_to_screen_matrix * head_to_world_matrix;
-
         // uniforms
         let head_to_world_matrix_uniform: [[f32; 4]; 4] = head_to_world_matrix.into();
         let world_to_screen_matrix_uniform: [[f32; 4]; 4] = (*world_to_screen_matrix).into();
         let uniforms = uniform! {
             object_to_world_matrix:      head_to_world_matrix_uniform,
             world_to_screen_matrix:      world_to_screen_matrix_uniform,
-            ambient_light_color:         [0.5, 0.5, 0.5f32],
-            directional_light_dir:       [1.0, 2.0, 3.0f32],
-            directional_light_color:     [0.5, 0.5, 0.5f32],
+            ambient_light_color:         [0.30, 0.30, 0.35f32],
+            directional_light_dir:       [1.00, 2.00, 3.00f32],
+            directional_light_color:     [0.50, 0.50, 0.50f32],
         };
 
         // draw parameters

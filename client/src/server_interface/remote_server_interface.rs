@@ -19,6 +19,7 @@ use shared::consts;
 use shared::consts::TICK_SPEED;
 use shared::consts::NEWEST_TICK_TIME_WEIGHT;
 use shared::util;
+use shared::util::Mix;
 
 use super::ConnectionState;
 use super::ServerInterface;
@@ -64,7 +65,9 @@ impl Network {
 enum SnapshotState {
     BeforeSnapshot,
     AfterSnapshot {
-        start_tick_time: Instant,
+        // current estimation of when the first tick would have arrived
+        start_tick_time_avg: Instant,
+        start_tick_time_var: f64, // variance of the travel times of the snapshots
         snapshots: HashMap<u64, Snapshot>,
         sent_inputs: HashMap<u64, CharacterInput>,
         oldest_snapshot_tick: u64,
@@ -112,16 +115,15 @@ impl RemoteServerInterface {
 
     fn on_snapshot(&mut self, snapshot: Snapshot) {
         let recv_time = Instant::now();
-        let new_start_tick_time = recv_time - util::mult_duration(
+        let start_tick_time = recv_time - util::mult_duration(
             consts::tick_duration(),
-            snapshot.get_tick()
-        ) + consts::tick_time_tolerance();
-        // the tolerance is some extra delay in our ticks to make it likely
-        // that the next snapshot will be there on any tick
+            snapshot.get_tick(),
+        );
         if let Connected { ref mut snapshot_state, .. } = self.internal_state {
             match snapshot_state {
                 &mut BeforeSnapshot => *snapshot_state = AfterSnapshot {
-                    start_tick_time: new_start_tick_time,
+                    start_tick_time_avg: start_tick_time,
+                    start_tick_time_var: 0.0,
                     tick_info: TickInfo { // not a real tick info :/ but we need one
                         tick: snapshot.get_tick(),
                         predicted_tick: snapshot.get_tick(),
@@ -133,18 +135,47 @@ impl RemoteServerInterface {
                     sent_inputs: HashMap::new(),
                 },
                 &mut AfterSnapshot {
-                    ref mut start_tick_time,
+                    ref mut start_tick_time_avg,
+                    ref mut start_tick_time_var,
                     oldest_snapshot_tick,
                     ref mut snapshots,
                     ..
                 } => {
-                    if snapshot.get_tick() > oldest_snapshot_tick {
-                        *start_tick_time = util::mix_time(
-                            *start_tick_time,
-                            new_start_tick_time,
-                            NEWEST_TICK_TIME_WEIGHT
+                    let old_diff = if start_tick_time > *start_tick_time_avg {
+                        util::duration_as_float(start_tick_time - *start_tick_time_avg)
+                    } else {
+                        -util::duration_as_float(*start_tick_time_avg - start_tick_time)
+                    };
+                    if old_diff > Self::tick_tolerance_delay_float(*start_tick_time_var) {
+                        println!(
+                            "WARNING: Snapshot {} arrived too late! | \
+                                Deviation from mean: {:.2}ms | \
+                                Tick tolerance delay: {:.2}ms",
+                            snapshot.get_tick(),
+                            old_diff * 1000.0,
+                            Self::tick_tolerance_delay_float(*start_tick_time_var) * 1000.0
                         );
+                    }
+                    *start_tick_time_avg = util::mix_time(
+                        *start_tick_time_avg,
+                        start_tick_time,
+                        NEWEST_TICK_TIME_WEIGHT
+                    );
+                    let new_diff = if start_tick_time > *start_tick_time_avg {
+                        util::duration_as_float(start_tick_time - *start_tick_time_avg)
+                    } else {
+                        -util::duration_as_float(*start_tick_time_avg - start_tick_time)
+                    };
+                    *start_tick_time_var = start_tick_time_var.mix(
+                        &(old_diff * new_diff),
+                        NEWEST_TICK_TIME_WEIGHT
+                    );
+                    if snapshot.get_tick() > oldest_snapshot_tick {
                         snapshots.insert(snapshot.get_tick(), snapshot);
+                    } else {
+                        println!("WARNING: Discarded snapshot {}!", snapshot.get_tick());
+                        use std;
+                        std::process::exit(0);
                     }
                 },
             }
@@ -181,6 +212,14 @@ impl RemoteServerInterface {
             EchoResponse(_) => (),
         }
     }
+
+    fn tick_tolerance_delay_float(start_tick_time_var: f64) -> f64 {
+        start_tick_time_var.sqrt() * consts::SNAPSHOT_ARRIVAL_SIGMA_FACTOR
+    }
+
+    fn tick_tolerance_delay(start_tick_time_var: f64) -> Duration {
+        util::duration_from_float(Self::tick_tolerance_delay_float(start_tick_time_var))
+    }
 }
 
 impl ServerInterface for RemoteServerInterface {
@@ -189,7 +228,8 @@ impl ServerInterface for RemoteServerInterface {
         if let Connected {
             my_player_id,
             snapshot_state: AfterSnapshot {
-                start_tick_time,
+                start_tick_time_avg,
+                start_tick_time_var,
                 ref mut tick_info,
                 ref mut oldest_snapshot_tick,
                 ref mut snapshots,
@@ -197,8 +237,13 @@ impl ServerInterface for RemoteServerInterface {
             },
         } = self.internal_state {
             tick_info.tick_time = tick_info.next_tick_time;
+            // tick_tolerance_delay is a confidence interval of the distribution
+            // of the snapshot travel times, with which we delay our ticks
+            // to make it likely that the snapshots will be on time
             let target_float_tick = util::elapsed_ticks_float(
-                tick_info.tick_time - start_tick_time,
+                tick_info.tick_time
+                    - start_tick_time_avg
+                    - Self::tick_tolerance_delay(start_tick_time_var),
                 TICK_SPEED
             );
             let float_tick = (tick_info.tick + 1) as f64;
@@ -219,7 +264,7 @@ impl ServerInterface for RemoteServerInterface {
                      target_float_tick as u64
                 );
                 tick_info.tick = target_float_tick as u64;
-                duration_factor = 1.0
+                duration_factor = 1.0;
             }
             tick_info.next_tick_time = tick_info.tick_time + util::mult_duration_float(
                 consts::tick_duration(),
@@ -239,7 +284,10 @@ impl ServerInterface for RemoteServerInterface {
                     t -= 1;
                 }
                 for t in *oldest_snapshot_tick..new_oldest_snapshot_tick {
-                    snapshots.remove(&t);
+                    let snapshot = snapshots.remove(&t);
+                    if snapshot.is_none() {
+                        println!("WARNING: Snapshot {} was never seen!", t);
+                    }
                 }
                 for t in (*oldest_snapshot_tick + 1)..(new_oldest_snapshot_tick + 1) {
                     sent_inputs.remove(&t);
@@ -258,7 +306,12 @@ impl ServerInterface for RemoteServerInterface {
             *model = oldest_snapshot.get_model().clone(); // TODO do this better
             let tick_diff = tick_info.tick - *oldest_snapshot_tick;
             if tick_diff > 0 {
-                println!("WARNING: {} ticks ahead of snapshot!", tick_diff);
+                println!(
+                    "WARNING: {} ticks ahead of snapshots! | \
+                        Current tick: {} Tick of last snapshot: {} | \
+                        Target tick: {}",
+                    tick_diff, tick_info.tick, *oldest_snapshot_tick, target_float_tick as u64
+                );
             }
             for tick in (*oldest_snapshot_tick + 1)..(tick_info.tick + 1) {
                 if let Some(input) = sent_inputs.get(&tick) {
