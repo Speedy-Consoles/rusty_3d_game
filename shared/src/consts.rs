@@ -36,9 +36,6 @@ pub fn draw_interval() -> Duration { // TODO move to config, make const
 
 // network
 //pub const MAX_PREDICT_TICKS: usize = 120;
-pub const NEWEST_TICK_TIME_WEIGHT: f64 = 0.05;
-// artificial delay to make it likely that snapshots will be there on time
-pub fn tick_time_tolerance() -> Duration { // TODO make const
-    Duration::new(0, 2_000_000)
-}
-pub const SNAPSHOT_ARRIVAL_SIGMA_FACTOR: f64 = 2.5;
+pub const NEWEST_START_TICK_TIME_WEIGHT: f64 = 0.001;
+pub const NEWEST_START_TICK_TIME_DEVIATION_WEIGHT: f64 = 0.005;
+pub const SNAPSHOT_ARRIVAL_SIGMA_FACTOR: f64 = 3.0;

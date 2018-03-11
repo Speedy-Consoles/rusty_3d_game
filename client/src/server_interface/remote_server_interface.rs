@@ -17,7 +17,8 @@ use shared::net::DisconnectReason;
 use shared::net::MAX_MESSAGE_LENGTH;
 use shared::consts;
 use shared::consts::TICK_SPEED;
-use shared::consts::NEWEST_TICK_TIME_WEIGHT;
+use shared::consts::NEWEST_START_TICK_TIME_WEIGHT;
+use shared::consts::NEWEST_START_TICK_TIME_DEVIATION_WEIGHT;
 use shared::util;
 use shared::util::Mix;
 
@@ -159,7 +160,7 @@ impl RemoteServerInterface {
                     *start_tick_time_avg = util::mix_time(
                         *start_tick_time_avg,
                         start_tick_time,
-                        NEWEST_TICK_TIME_WEIGHT
+                        NEWEST_START_TICK_TIME_WEIGHT
                     );
                     let new_diff = if start_tick_time > *start_tick_time_avg {
                         util::duration_as_float(start_tick_time - *start_tick_time_avg)
@@ -168,7 +169,7 @@ impl RemoteServerInterface {
                     };
                     *start_tick_time_var = start_tick_time_var.mix(
                         &(old_diff * new_diff),
-                        NEWEST_TICK_TIME_WEIGHT
+                        NEWEST_START_TICK_TIME_DEVIATION_WEIGHT
                     );
                     if snapshot.get_tick() > oldest_snapshot_tick {
                         snapshots.insert(snapshot.get_tick(), snapshot);
