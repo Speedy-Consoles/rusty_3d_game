@@ -3,11 +3,10 @@ mod remote_server_interface;
 
 use std::time::Instant;
 
+use shared::tick_time::TickInstant;
 use shared::util;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
-
-use tick_time::TickInstant;
 
 pub use self::local_server_interface::*;
 pub use self::remote_server_interface::*;

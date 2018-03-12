@@ -19,6 +19,7 @@ use cgmath::SquareMatrix;
 use cgmath::Rad;
 use cgmath::PerspectiveFov;
 
+use shared::tick_time::TickInstant;
 use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::ViewDir;
@@ -27,7 +28,6 @@ use shared::consts::OPTIMAL_SCREEN_RATIO;
 use shared::consts::Z_NEAR;
 use shared::consts::Z_FAR;
 
-use tick_time::TickInstant;
 use self::visual_world::VisualWorld;
 use self::visual_world::VisualCharacter;
 

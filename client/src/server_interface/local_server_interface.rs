@@ -1,8 +1,7 @@
 use std::time::Instant;
 use std::thread;
 
-use shared::consts;
-use shared::util;
+use shared::consts::TICK_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 
@@ -48,7 +47,7 @@ impl ServerInterface for LocalServerInterface {
                         tick: 0,
                         predicted_tick: 0,
                         tick_time: now,
-                        next_tick_time: now + consts::tick_duration(),
+                        next_tick_time: now + 1 / TICK_SPEED,
                     }
                 };
             },
@@ -58,8 +57,7 @@ impl ServerInterface for LocalServerInterface {
                 tick_info.tick += 1; // TODO allow tick skipping
                 tick_info.predicted_tick = tick_info.tick;
                 tick_info.tick_time = tick_info.next_tick_time;
-                tick_info.next_tick_time = start_tick_time
-                    + util::mult_duration(consts::tick_duration(), tick_info.tick + 1);
+                tick_info.next_tick_time = start_tick_time + (tick_info.tick + 1) / TICK_SPEED;
                 tick_diff = tick_info.tick - prev_tick;
             },
             AfterDisconnect => return,

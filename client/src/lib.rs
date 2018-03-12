@@ -2,7 +2,6 @@ mod graphics;
 mod controls;
 mod config;
 mod server_interface;
-mod tick_time;
 
 #[macro_use] extern crate glium;
 extern crate cgmath;
@@ -21,9 +20,8 @@ use glium::glutin;
 use glium::backend::glutin::Display;
 
 use shared::math::FPAngle;
-use shared::consts;
+use shared::consts::TICK_SPEED;
 use shared::consts::DRAW_SPEED;
-use shared::util;
 use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
@@ -125,7 +123,7 @@ impl Client {
                     self.predict(tick_info.tick, tick_info.predicted_tick, my_player_id);
                     next_tick_time = tick_info.next_tick_time;
                 } else {
-                    next_tick_time = next_tick_time + consts::tick_duration();
+                    next_tick_time = next_tick_time + 1 / TICK_SPEED;
                 }
                 tick_counter += 1;
             }
@@ -156,8 +154,8 @@ impl Client {
                     );
                     draw_counter += 1;
                 }
-                let draw_diff = util::elapsed_events(next_draw_time.elapsed(), DRAW_SPEED);
-                next_draw_time += util::mult_duration(consts::draw_interval(), draw_diff + 1);
+                let draw_tick_diff = (next_draw_time.elapsed() * DRAW_SPEED).ticks;
+                next_draw_time += (draw_tick_diff + 1) / DRAW_SPEED;
             }
 
             // display rates

@@ -1,15 +1,12 @@
 use std::time::Duration;
 use std::f64::consts::PI;
 
-// TODO make function calls const variables
+use tick_time::TickRate;
 
 // SHARED
 
 // ticks
-pub const TICK_SPEED: u64 = 120;
-pub fn tick_duration() -> Duration { // TODO get rid of this
-    Duration::from_secs(1) / TICK_SPEED as u32
-}
+pub const TICK_SPEED: TickRate = TickRate { per_second: 120 };
 
 // physics
 // TODO move const fixed points from model here
@@ -29,10 +26,7 @@ pub const OPTIMAL_SCREEN_RATIO: f64 = 16.0 / 9.0;
 pub const Y_FOV: f64 = PI / 3.0;
 pub const Z_NEAR: f64 = 0.1;
 pub const Z_FAR: f64 = 100.0;
-pub const DRAW_SPEED: u64 = 60; // TODO move to config
-pub fn draw_interval() -> Duration { // TODO get rid of this
-    Duration::from_secs(1) / DRAW_SPEED as u32
-}
+pub const DRAW_SPEED: TickRate = TickRate { per_second: 60 }; // TODO move to config
 
 // network
 //pub const MAX_PREDICT_TICKS: usize = 120;

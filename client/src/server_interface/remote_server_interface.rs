@@ -9,6 +9,7 @@ use std::iter;
 use std::ops::Sub;
 use std::ops::Add;
 
+use shared::tick_time::TickInstant;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::net::ServerMessage;
@@ -17,7 +18,6 @@ use shared::net::Packable;
 use shared::net::Snapshot;
 use shared::net::DisconnectReason;
 use shared::net::MAX_MESSAGE_LENGTH;
-use shared::consts;
 use shared::consts::TICK_SPEED;
 use shared::consts::NEWEST_START_TICK_TIME_WEIGHT;
 use shared::consts::NEWEST_START_TICK_TIME_DEVIATION_WEIGHT;
@@ -25,7 +25,6 @@ use shared::consts::SNAPSHOT_ARRIVAL_SIGMA_FACTOR;
 use shared::util;
 use shared::util::Mix;
 
-use tick_time::TickInstant;
 use super::ConnectionState;
 use super::ServerInterface;
 use super::TickInfo;
@@ -180,10 +179,7 @@ impl RemoteServerInterface {
 
     fn on_snapshot(&mut self, snapshot: Snapshot) {
         let recv_time = Instant::now();
-        let start_tick_time = recv_time - util::mult_duration(
-            consts::tick_duration(),
-            snapshot.tick(),
-        );
+        let start_tick_time = recv_time - snapshot.tick() / TICK_SPEED;
         if let Connected { ref mut snapshot_state, .. } = self.internal_state {
             match snapshot_state {
                 &mut BeforeSnapshot => *snapshot_state = AfterSnapshot {
@@ -266,6 +262,7 @@ impl ServerInterface for RemoteServerInterface {
                 start_tick_time_distribution.mean()
                     + start_tick_time_distribution.sigma_dev(SNAPSHOT_ARRIVAL_SIGMA_FACTOR),
                 tick_info.next_tick_time,
+                TICK_SPEED,
             );
             tick_info.tick += 1;
             tick_info.tick_time = tick_info.next_tick_time;
@@ -277,8 +274,9 @@ impl ServerInterface for RemoteServerInterface {
                 target_tick_instant.intra_tick - (tick_diff as f64)
             };
 
-            let param1 = TICK_SPEED as f64 / 4.0;
-            let param2 = TICK_SPEED as f64 / 4.0;
+            // TODO change stick speed instead of tick duration
+            let param1 = TICK_SPEED.per_second() as f64 / 4.0;
+            let param2 = TICK_SPEED.per_second() as f64 / 4.0;
             let param3 = 0.2;
             let duration_factor;
             if float_tick_diff < 0.0 {
@@ -293,10 +291,7 @@ impl ServerInterface for RemoteServerInterface {
                 tick_info.tick = target_tick_instant.tick;
                 duration_factor = 1.0;
             }
-            tick_info.next_tick_time = tick_info.tick_time + util::mult_duration_float(
-                consts::tick_duration(),
-                duration_factor,
-            );
+            tick_info.next_tick_time = tick_info.tick_time + duration_factor / TICK_SPEED;
             tick_info.predicted_tick = tick_info.tick + tick_lag;
 
             // remove old snapshots and inputs

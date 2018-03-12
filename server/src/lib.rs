@@ -10,8 +10,8 @@ use std::io::ErrorKind;
 
 use net2::UdpBuilder;
 
-use shared::util;
 use shared::consts;
+use shared::consts::TICK_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::net::ClientMessage;
@@ -74,8 +74,7 @@ impl Server {
             self.model.do_tick();
             let snapshot = ServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
             self.broadcast(snapshot);
-            next_tick_time = start_tick_time
-                    + util::mult_duration(consts::tick_duration(), self.tick);
+            next_tick_time = start_tick_time + (self.tick + 1) / TICK_SPEED;
             tick_counter += 1;
 
             // display tick rate
