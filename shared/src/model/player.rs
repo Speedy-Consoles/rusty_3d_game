@@ -16,7 +16,7 @@ impl Player {
         self.name = new_name;
     }
 
-    pub fn get_name(&mut self) -> &str {
+    pub fn name(&mut self) -> &str {
         self.name.as_str()
     }
 
@@ -24,7 +24,7 @@ impl Player {
         self.character_id = character_id;
     }
 
-    pub fn get_character_id(&self) -> Option<u64> {
+    pub fn character_id(&self) -> Option<u64> {
         self.character_id
     }
 

@@ -119,7 +119,7 @@ impl RemoteServerInterface {
         let recv_time = Instant::now();
         let start_tick_time = recv_time - util::mult_duration(
             consts::tick_duration(),
-            snapshot.get_tick(),
+            snapshot.tick(),
         );
         if let Connected { ref mut snapshot_state, .. } = self.internal_state {
             match snapshot_state {
@@ -127,13 +127,13 @@ impl RemoteServerInterface {
                     start_tick_time_avg: start_tick_time,
                     start_tick_time_var: 0.0,
                     tick_info: TickInfo { // not a real tick info :/ but we need one
-                        tick: snapshot.get_tick(),
-                        predicted_tick: snapshot.get_tick(),
+                        tick: snapshot.tick(),
+                        predicted_tick: snapshot.tick(),
                         tick_time: recv_time,
                         next_tick_time: recv_time, // must not lie in the future
                     },
-                    oldest_snapshot_tick: snapshot.get_tick(),
-                    snapshots: iter::once((snapshot.get_tick(), snapshot)).collect(),
+                    oldest_snapshot_tick: snapshot.tick(),
+                    snapshots: iter::once((snapshot.tick(), snapshot)).collect(),
                     sent_inputs: HashMap::new(),
                 },
                 &mut AfterSnapshot {
@@ -153,7 +153,7 @@ impl RemoteServerInterface {
                             "WARNING: Snapshot {} arrived too late! | \
                                 Deviation from mean: {:.2}ms | \
                                 Tick tolerance delay: {:.2}ms",
-                            snapshot.get_tick(),
+                            snapshot.tick(),
                             old_diff * 1000.0,
                             Self::tick_tolerance_delay_float(*start_tick_time_var) * 1000.0
                         );
@@ -171,10 +171,10 @@ impl RemoteServerInterface {
                         &(old_diff * new_diff),
                         NEWEST_START_TICK_TIME_DEVIATION_WEIGHT
                     );
-                    if snapshot.get_tick() > oldest_snapshot_tick {
-                        snapshots.insert(snapshot.get_tick(), snapshot);
+                    if snapshot.tick() > oldest_snapshot_tick {
+                        snapshots.insert(snapshot.tick(), snapshot);
                     } else {
-                        println!("WARNING: Discarded snapshot {}!", snapshot.get_tick());
+                        println!("WARNING: Discarded snapshot {}!", snapshot.tick());
                     }
                 },
             }
@@ -222,7 +222,7 @@ impl RemoteServerInterface {
 }
 
 impl ServerInterface for RemoteServerInterface {
-    fn tick(&mut self, model: &mut Model, character_input: CharacterInput) {
+    fn do_tick(&mut self, model: &mut Model, character_input: CharacterInput) {
         let tick_lag = 20;// TODO use adaptive delay and prevent predicted tick decreasing
         if let Connected {
             my_player_id,
@@ -305,7 +305,7 @@ impl ServerInterface for RemoteServerInterface {
 
             // update model
             let oldest_snapshot = snapshots.get(oldest_snapshot_tick).unwrap();
-            *model = oldest_snapshot.get_model().clone(); // TODO do this better
+            *model = oldest_snapshot.model().clone(); // TODO do this better
             let tick_diff = tick_info.tick - *oldest_snapshot_tick;
             if tick_diff > 0 {
                 println!(
@@ -319,7 +319,7 @@ impl ServerInterface for RemoteServerInterface {
                 if let Some(input) = sent_inputs.get(&tick) {
                     model.set_character_input(my_player_id, *input);
                 }
-                model.tick();
+                model.do_tick();
             }
         }
     }
@@ -336,7 +336,7 @@ impl ServerInterface for RemoteServerInterface {
         }
     }
 
-    fn get_connection_state(&self) -> ConnectionState {
+    fn connection_state(&self) -> ConnectionState {
         match self.internal_state {
             Connecting | Connected { snapshot_state: BeforeSnapshot, .. }
                 => ConnectionState::Connecting,
@@ -347,7 +347,7 @@ impl ServerInterface for RemoteServerInterface {
         }
     }
 
-    fn get_character_input(&self, tick: u64) -> Option<CharacterInput> {
+    fn character_input(&self, tick: u64) -> Option<CharacterInput> {
         if let Connected {
             snapshot_state: AfterSnapshot { ref sent_inputs, .. },
             ..

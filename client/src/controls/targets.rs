@@ -29,7 +29,7 @@ pub enum ValueTarget {
 }
 
 impl ValueTarget {
-    pub fn get_base_factor(&self) -> f64 {
+    pub fn base_factor(&self) -> f64 {
         use self::ValueTarget::*;
 
         match *self {

@@ -26,7 +26,7 @@ impl Model {
     }
 
     pub fn set_character_input(&mut self, player_id: u64, input: CharacterInput) {
-        if let Some(character_id) = self.players.get(&player_id).unwrap().get_character_id() {
+        if let Some(character_id) = self.players.get(&player_id).unwrap().character_id() {
             self.world.set_character_input(character_id, input);
         }
     }
@@ -44,7 +44,7 @@ impl Model {
     pub fn remove_player(&mut self, player_id: u64) -> Option<Player> {
         let mut result = self.players.remove(&player_id);
         if let Some(ref mut player) = result {
-            if let Some(character_id) = player.get_character_id() {
+            if let Some(character_id) = player.character_id() {
                 self.world.remove_character(character_id);
                 player.set_character_id(None);
             }
@@ -52,15 +52,15 @@ impl Model {
         result
     }
 
-    pub fn get_player(&self, player_id: u64) -> Option<&Player> {
+    pub fn player(&self, player_id: u64) -> Option<&Player> {
         self.players.get(&player_id)
     }
 
-    pub fn get_world<'a>(&'a self) -> &'a World {
+    pub fn world<'a>(&'a self) -> &'a World {
         &self.world
     }
 
-    pub fn tick(&mut self) {
-        self.world.tick();
+    pub fn do_tick(&mut self) {
+        self.world.do_tick();
     }
 }

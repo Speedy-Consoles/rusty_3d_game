@@ -33,7 +33,7 @@ impl LocalServerInterface {
 }
 
 impl ServerInterface for LocalServerInterface {
-    fn tick(&mut self, model: &mut Model, input: CharacterInput) {
+    fn do_tick(&mut self, model: &mut Model, input: CharacterInput) {
         let tick_diff;
         let player_id;
         match self.internal_state {
@@ -67,7 +67,7 @@ impl ServerInterface for LocalServerInterface {
 
         for _ in 0..tick_diff {
             model.set_character_input(player_id, input);
-            model.tick();
+            model.do_tick();
         }
     }
 
@@ -81,7 +81,7 @@ impl ServerInterface for LocalServerInterface {
         }
     }
 
-    fn get_connection_state(&self) -> ConnectionState {
+    fn connection_state(&self) -> ConnectionState {
         match self.internal_state {
             BeforeFirstTick => ConnectionState::Connecting,
             AfterFirstTick { my_player_id, tick_info, .. }
@@ -90,7 +90,7 @@ impl ServerInterface for LocalServerInterface {
         }
     }
 
-    fn get_character_input(&self, _tick: u64) -> Option<CharacterInput> {
+    fn character_input(&self, _tick: u64) -> Option<CharacterInput> {
         None
     }
 

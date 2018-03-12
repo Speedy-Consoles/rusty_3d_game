@@ -118,10 +118,10 @@ impl Client {
                     character_input = Default::default();
                     character_input.view_dir = self.character_input.view_dir;
                 }
-                self.server_interface.tick(&mut self.model, character_input);
+                self.server_interface.do_tick(&mut self.model, character_input);
                 self.character_input.reset_flags();
                 if let Connected { tick_info, my_player_id }
-                        = self.server_interface.get_connection_state() {
+                        = self.server_interface.connection_state() {
                     self.predict(tick_info.tick, tick_info.predicted_tick, my_player_id);
                     next_tick_time = tick_info.next_tick_time;
                 } else {
@@ -139,7 +139,7 @@ impl Client {
             let before_draw = Instant::now();
             if before_draw >= next_draw_time {
                 if let Connected { tick_info, my_player_id }
-                        = self.server_interface.get_connection_state() {
+                        = self.server_interface.connection_state() {
                     let view_dir = if self.config.direct_camera {
                         Some(self.character_input.view_dir)
                     } else {
@@ -202,12 +202,12 @@ impl Client {
     }
 
     fn predict(&mut self, current_tick: u64, predicted_tick: u64, my_player_id: u64) {
-        self.predicted_world = self.model.get_world().clone();
+        self.predicted_world = self.model.world().clone();
         for tick in (current_tick + 1)..(predicted_tick + 1) {
-            if let Some(input) = self.server_interface.get_character_input(tick) {
+            if let Some(input) = self.server_interface.character_input(tick) {
                 self.predicted_world.set_character_input(my_player_id, input);
             }
-            self.predicted_world.tick();
+            self.predicted_world.do_tick();
         }
     }
 
@@ -263,7 +263,7 @@ impl Client {
 
         let mut yaw_delta = 0.0;
         let mut pitch_delta = 0.0;
-        for ie in self.config.controls.get_events() {
+        for ie in self.config.controls.events() {
             match ie {
                 Fire(target) => {
                     match target {

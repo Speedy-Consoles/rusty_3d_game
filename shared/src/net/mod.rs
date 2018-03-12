@@ -53,11 +53,11 @@ impl Snapshot {
         }
     }
 
-    pub fn get_tick(&self) -> u64 {
+    pub fn tick(&self) -> u64 {
         self.tick
     }
 
-    pub fn get_model(&self) -> &Model {
+    pub fn model(&self) -> &Model {
         &self.model
     }
 }

@@ -43,9 +43,9 @@ impl TickInfo {
 }
 
 pub trait ServerInterface {
-    fn tick(&mut self, model: &mut Model, input: CharacterInput);
+    fn do_tick(&mut self, model: &mut Model, input: CharacterInput);
     fn handle_traffic(&mut self, until: Instant);
-    fn get_connection_state(&self) -> ConnectionState;
-    fn get_character_input(&self, tick: u64) -> Option<CharacterInput>;
+    fn connection_state(&self) -> ConnectionState;
+    fn character_input(&self, tick: u64) -> Option<CharacterInput>;
     fn disconnect(&mut self);
 }

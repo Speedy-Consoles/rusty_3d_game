@@ -71,7 +71,7 @@ impl Server {
                     self.model.set_character_input(*id, input);
                 }
             }
-            self.model.tick();
+            self.model.do_tick();
             let snapshot = ServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
             self.broadcast(snapshot);
             next_tick_time = start_tick_time

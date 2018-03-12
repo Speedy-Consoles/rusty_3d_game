@@ -38,17 +38,17 @@ impl World {
         }
     }
 
-    pub fn get_character(&self, character_id: u64) -> Option<&Character> {
+    pub fn character(&self, character_id: u64) -> Option<&Character> {
         self.characters.get(&character_id)
     }
 
-    pub fn get_characters(&self) -> &HashMap<u64, Character> {
+    pub fn characters(&self) -> &HashMap<u64, Character> {
         &self.characters
     }
 
-    pub fn tick(&mut self) {
+    pub fn do_tick(&mut self) {
         for (_, mut c) in self.characters.iter_mut() {
-            c.tick();
+            c.do_tick();
         }
     }
 }

@@ -139,9 +139,9 @@ impl Graphics {
 
     pub fn draw(&mut self, current_model: &Model, predicted_world: &World, my_player_id: u64,
                 view_dir: Option<ViewDir>, tick_instant: TickInstant, display: &Display) {
-        let current_world = current_model.get_world();
-        let my_character_id = current_model.get_player(my_player_id)
-                .and_then(|p| p.get_character_id());
+        let current_world = current_model.world();
+        let my_character_id = current_model.player(my_player_id)
+                .and_then(|p| p.character_id());
         if self.current_tick != tick_instant.tick {
             self.last_tick = self.current_tick;
             mem::swap(&mut self.last_visual_world, &mut self.current_visual_world);
@@ -157,26 +157,26 @@ impl Graphics {
         );
 
         let character = if let Some(c) = my_character_id.and_then(|id|
-                self.current_visual_world.get_character(id)) {
+                self.current_visual_world.character(id)) {
             c
         } else {
             return
         };
 
-        let mut yaw = character.get_yaw();
-        let mut pitch = character.get_pitch();
+        let mut yaw = character.yaw();
+        let mut pitch = character.pitch();
 
         // overwrite with direct camera
         if let Some(vd) = view_dir {
-            yaw = vd.get_yaw().rad_f32();
-            pitch = vd.get_pitch().rad_f32();
+            yaw = vd.yaw().rad_f32();
+            pitch = vd.pitch().rad_f32();
         }
 
         // world cs to character cs
         let world_to_character_matrix =
             Matrix4::from_angle_y(Rad(pitch as f32))
             * Matrix4::from_angle_z(Rad(-yaw as f32))
-            * Matrix4::from_translation(-character.get_pos());
+            * Matrix4::from_translation(-character.pos());
 
         // world cs to screen cs
         let world_to_screen_matrix = self.perspective_matrix * world_to_character_matrix;
@@ -187,7 +187,7 @@ impl Graphics {
 
         self.draw_background(&mut frame, &world_to_screen_matrix);
 
-        for (id, character) in self.mix_world.get_characters() {
+        for (id, character) in self.mix_world.characters() {
             if Some(*id) == my_character_id {
                 continue;
             }
@@ -215,11 +215,11 @@ impl Graphics {
     fn draw_character(&self, character: &VisualCharacter,
                       frame: &mut Frame, world_to_screen_matrix: &Matrix4<f32>) {
         // character cs to world cs
-        let character_to_world_matrix = Matrix4::from_translation(character.get_pos().into());
+        let character_to_world_matrix = Matrix4::from_translation(character.pos().into());
         // head cs to world cs
         let head_to_world_matrix = character_to_world_matrix
-            * Matrix4::from_angle_z(Rad(character.get_yaw() as f32))
-            * Matrix4::from_angle_y(Rad(-character.get_pitch() as f32));
+            * Matrix4::from_angle_z(Rad(character.yaw() as f32))
+            * Matrix4::from_angle_y(Rad(-character.pitch() as f32));
 
         // uniforms
         let head_to_world_matrix_uniform: [[f32; 4]; 4] = head_to_world_matrix.into();

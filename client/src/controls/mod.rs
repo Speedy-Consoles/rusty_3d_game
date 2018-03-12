@@ -273,13 +273,13 @@ impl Controls {
         }
     }
 
-    pub fn get_events(&mut self) -> Vec<ControlEvent> {
+    pub fn events(&mut self) -> Vec<ControlEvent> {
         let mut events = VecDeque::new();// TODO get rid of allocation
         std::mem::swap(&mut events, &mut self.events);
         events.into()
     }
 
-    pub fn get_state(&self, target: SwitchTarget) -> SwitchState {
+    pub fn switch_target_state(&self, target: SwitchTarget) -> SwitchState {
         use self::SwitchState::*;
 
         match *self.switch_counter.get(&target).unwrap() {
@@ -294,7 +294,7 @@ impl Controls {
         if let Some(mapping) = self.axis_mappings.get(&axis) {
             for &target in mapping {
                 let factor = self.value_factors.get(&target).unwrap_or(&1.0);
-                value *= factor * target.get_base_factor();
+                value *= factor * target.base_factor();
                 self.events.push_back(Value { target, value });
             }
         }

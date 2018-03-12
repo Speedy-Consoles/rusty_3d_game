@@ -19,11 +19,11 @@ impl ViewDir {
         self.pitch = (self.pitch + delta).max(-q).min(q);
     }
 
-    pub fn get_yaw(&self) -> FPAngle {
+    pub fn yaw(&self) -> FPAngle {
         self.yaw
     }
 
-    pub fn get_pitch(&self) -> FPAngle {
+    pub fn pitch(&self) -> FPAngle {
         self.pitch
     }
 }
@@ -78,15 +78,15 @@ impl Character {
         self.input = input;
     }
 
-    pub fn get_pos(&self) -> Vec3 {
+    pub fn pos(&self) -> Vec3 {
         self.pos
     }
 
-    pub fn get_view_dir(&self) -> ViewDir {
+    pub fn view_dir(&self) -> ViewDir {
         self.view_dir
     }
 
-    pub fn tick(&mut self) {
+    pub fn do_tick(&mut self) {
         // TODO move these to consts
         let max_expansion = FixedPoint::new(0);
         let min_expansion = FixedPoint::fraction(-8, 10);

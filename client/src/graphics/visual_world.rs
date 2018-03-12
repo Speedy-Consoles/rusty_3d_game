@@ -16,9 +16,9 @@ pub struct VisualCharacter {
 
 impl VisualCharacter {
     pub fn build(character: &Character) -> VisualCharacter {
-        let wcp = character.get_pos();
-        let wc_yaw = character.get_view_dir().get_yaw();
-        let wc_pitch = character.get_view_dir().get_pitch();
+        let wcp = character.pos();
+        let wc_yaw = character.view_dir().yaw();
+        let wc_pitch = character.view_dir().pitch();
         VisualCharacter {
             pos: wcp.into(),
             yaw: wc_yaw.rad_f32(),
@@ -26,15 +26,15 @@ impl VisualCharacter {
         }
     }
 
-    pub fn get_pos(&self) -> Vector3<f32> {
+    pub fn pos(&self) -> Vector3<f32> {
         self.pos
     }
 
-    pub fn get_yaw(&self) -> f32 {
+    pub fn yaw(&self) -> f32 {
         self.yaw
     }
 
-    pub fn get_pitch(&self) -> f32 {
+    pub fn pitch(&self) -> f32 {
         self.pitch
     }
 }
@@ -71,14 +71,14 @@ impl VisualWorld {
     pub fn rebuild(&mut self, my_character_id: Option<u64>,
                    current_world: &World, predicted_world: &World) {
         self.reset();
-        for (&id, c) in  current_world.get_characters() {
+        for (&id, c) in  current_world.characters() {
             if Some(id) == my_character_id {
                 continue;
             }
             self.characters.insert(id, VisualCharacter::build(c));
         }
         if let Some(id) = my_character_id {
-            if let Some(character) = predicted_world.get_character(id) {
+            if let Some(character) = predicted_world.character(id) {
                 self.characters.insert(id, VisualCharacter::build(character));
             }
         }
@@ -86,8 +86,8 @@ impl VisualWorld {
 
     pub fn remix(&mut self, a: &VisualWorld, b: &VisualWorld, ratio: f64) {
         self.reset();
-        for (id, cb) in b.get_characters() {
-            if let Some(ca) = a.get_characters().get(id) {
+        for (id, cb) in b.characters() {
+            if let Some(ca) = a.characters().get(id) {
                 self.characters.insert(*id, ca.mix(cb, ratio));
             } else {
                 self.characters.insert(*id, cb.clone()); // always insert characters of the current world
@@ -95,11 +95,11 @@ impl VisualWorld {
         }
     }
 
-    pub fn get_character(&self, character_id: u64) -> Option<&VisualCharacter> {
+    pub fn character(&self, character_id: u64) -> Option<&VisualCharacter> {
         self.characters.get(&character_id)
     }
 
-    pub fn get_characters(&self) -> &HashMap<u64, VisualCharacter> {
+    pub fn characters(&self) -> &HashMap<u64, VisualCharacter> {
         &self.characters
     }
 
