@@ -6,9 +6,9 @@ use std::f64::consts::PI;
 // SHARED
 
 // ticks
-pub const TICK_SPEED: u32 = 120;
-pub fn tick_duration() -> Duration {
-    Duration::from_secs(1) / TICK_SPEED
+pub const TICK_SPEED: u64 = 120;
+pub fn tick_duration() -> Duration { // TODO get rid of this
+    Duration::from_secs(1) / TICK_SPEED as u32
 }
 
 // physics
@@ -29,9 +29,9 @@ pub const OPTIMAL_SCREEN_RATIO: f64 = 16.0 / 9.0;
 pub const Y_FOV: f64 = PI / 3.0;
 pub const Z_NEAR: f64 = 0.1;
 pub const Z_FAR: f64 = 100.0;
-pub const DRAW_SPEED: u32 = 60; // TODO move to config
-pub fn draw_interval() -> Duration { // TODO move to config, make const
-    Duration::from_secs(1) / DRAW_SPEED
+pub const DRAW_SPEED: u64 = 60; // TODO move to config
+pub fn draw_interval() -> Duration { // TODO get rid of this
+    Duration::from_secs(1) / DRAW_SPEED as u32
 }
 
 // network

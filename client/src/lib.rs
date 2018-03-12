@@ -2,6 +2,7 @@ mod graphics;
 mod controls;
 mod config;
 mod server_interface;
+mod tick_time;
 
 #[macro_use] extern crate glium;
 extern crate cgmath;
@@ -26,6 +27,7 @@ use shared::util;
 use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
+
 use graphics::Graphics;
 use server_interface::ServerInterface;
 use server_interface::LocalServerInterface;
@@ -149,13 +151,12 @@ impl Client {
                         &self.predicted_world,
                         my_player_id,
                         view_dir,
-                        tick_info.tick,
-                        util::intra_tick(tick_info.tick_time, tick_info.next_tick_time),
+                        tick_info.now(),
                         &self.display
                     );
                     draw_counter += 1;
                 }
-                let draw_diff = util::elapsed_ticks(next_draw_time.elapsed(), DRAW_SPEED);
+                let draw_diff = util::elapsed_events(next_draw_time.elapsed(), DRAW_SPEED);
                 next_draw_time += util::mult_duration(consts::draw_interval(), draw_diff + 1);
             }
 

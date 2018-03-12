@@ -1,6 +1,9 @@
 use std::time::Duration;
 use std::time::Instant;
+
 use cgmath::Vector3;
+
+use consts::TICK_SPEED;
 
 pub fn duration_as_float(duration: Duration) -> f64 {
     duration.as_secs() as f64 + duration.subsec_nanos() as f64 * 1e-9
@@ -27,26 +30,10 @@ pub fn mult_duration_float(duration: Duration, factor: f64) -> Duration {
     duration_from_float(duration_as_float(duration) * factor)
 }
 
-pub fn mix_time(a: Instant, b: Instant, factor: f64) -> Instant {
-    if a > b {
-        return mix_time(b, a, 1.0 - factor);
-    }
-    a + mult_duration_float(b - a, factor)
-}
-
-pub fn elapsed_ticks_float(duration: Duration, tick_speed: u32) -> f64 {
-    let sec_diff = duration.as_secs() as f64 + duration.subsec_nanos() as f64 * 1e-9;
-    sec_diff * tick_speed as f64
-}
-
-pub fn elapsed_ticks(duration: Duration, tick_speed: u32) -> u64 {
-    elapsed_ticks_float(duration, tick_speed) as u64
-}
-
-pub fn intra_tick(tick_time: Instant, next_tick_time: Instant) -> f64 {
-    let part_dur = Instant::now() - tick_time;
-    let whole_dur = next_tick_time - tick_time;
-    duration_as_float(part_dur) / duration_as_float(whole_dur)
+pub fn elapsed_events(duration: Duration, event_rate: u64) -> u64 {
+    let ticks_sec = duration.as_secs() * event_rate;
+    let ticks_nano = duration.subsec_nanos() as u64 * TICK_SPEED / 1_000_000_000;
+    ticks_sec + ticks_nano
 }
 
 pub trait Mix {
@@ -72,5 +59,14 @@ impl Mix for Vector3<f32> {
             self.y.mix(&other.y, ratio),
             self.z.mix(&other.z, ratio)
         )
+    }
+}
+
+impl Mix for Instant {
+    fn mix(&self, other: &Instant, factor: f64) -> Instant {
+        if *self > *other {
+            return other.mix(self, 1.0 - factor);
+        }
+        *self + mult_duration_float(*other - *self, factor)
     }
 }

@@ -22,6 +22,7 @@ use shared::consts::NEWEST_START_TICK_TIME_DEVIATION_WEIGHT;
 use shared::util;
 use shared::util::Mix;
 
+use tick_time::TickInstant;
 use super::ConnectionState;
 use super::ServerInterface;
 use super::TickInfo;
@@ -157,9 +158,8 @@ impl RemoteServerInterface {
                             Self::tick_tolerance_delay_float(*start_tick_time_var) * 1000.0
                         );
                     }
-                    *start_tick_time_avg = util::mix_time(
-                        *start_tick_time_avg,
-                        start_tick_time,
+                    *start_tick_time_avg = start_tick_time_avg.mix(
+                        &start_tick_time,
                         NEWEST_START_TICK_TIME_WEIGHT
                     );
                     let new_diff = if start_tick_time > *start_tick_time_avg {
@@ -239,30 +239,33 @@ impl ServerInterface for RemoteServerInterface {
             // tick_tolerance_delay is a confidence interval of the distribution
             // of the snapshot travel times, with which we delay our ticks
             // to make it likely that the snapshots will be on time
-            let target_float_tick = util::elapsed_ticks_float(
-                tick_info.tick_time
-                    - start_tick_time_avg
-                    - Self::tick_tolerance_delay(start_tick_time_var),
-                TICK_SPEED
+            let target_tick_instant = TickInstant::new(
+                start_tick_time_avg + Self::tick_tolerance_delay(start_tick_time_var),
+                tick_info.tick_time,
             );
-            let float_tick = (tick_info.tick + 1) as f64;
-            let float_tick_diff = target_float_tick - float_tick;
+
+            tick_info.tick += 1;
+            let float_tick_diff = if target_tick_instant.tick > tick_info.tick {
+                let tick_diff = target_tick_instant.tick - tick_info.tick;
+                tick_diff as f64 + target_tick_instant.intra_tick
+            } else {
+                let tick_diff = tick_info.tick - target_tick_instant.tick;
+                target_tick_instant.intra_tick - (tick_diff as f64)
+            };
             let param1 = TICK_SPEED as f64 / 4.0;
             let param2 = TICK_SPEED as f64 / 4.0;
             let param3 = 0.2;
             let duration_factor;
             if float_tick_diff < 0.0 {
-                tick_info.tick += 1;
                 duration_factor = (-float_tick_diff / param1 + 1.0).min(2.0);
             } else if float_tick_diff <= param2 {
-                tick_info.tick += 1;
                 duration_factor = 1.0 - float_tick_diff / param2 * param3;
             } else {
                 println!("WARNING: Jumping from {} to {}!",
                      tick_info.tick,
-                     target_float_tick as u64
+                     target_tick_instant.tick
                 );
-                tick_info.tick = target_float_tick as u64;
+                tick_info.tick = target_tick_instant.tick;
                 duration_factor = 1.0;
             }
             tick_info.next_tick_time = tick_info.tick_time + util::mult_duration_float(
@@ -309,7 +312,7 @@ impl ServerInterface for RemoteServerInterface {
                     "WARNING: {} ticks ahead of snapshots! | \
                         Current tick: {} Tick of last snapshot: {} | \
                         Target tick: {}",
-                    tick_diff, tick_info.tick, *oldest_snapshot_tick, target_float_tick as u64
+                    tick_diff, tick_info.tick, *oldest_snapshot_tick, target_tick_instant.tick
                 );
             }
             for tick in (*oldest_snapshot_tick + 1)..(tick_info.tick + 1) {

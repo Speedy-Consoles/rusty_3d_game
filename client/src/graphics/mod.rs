@@ -26,6 +26,8 @@ use shared::consts::Y_FOV;
 use shared::consts::OPTIMAL_SCREEN_RATIO;
 use shared::consts::Z_NEAR;
 use shared::consts::Z_FAR;
+
+use tick_time::TickInstant;
 use self::visual_world::VisualWorld;
 use self::visual_world::VisualCharacter;
 
@@ -136,22 +138,22 @@ impl Graphics {
     }
 
     pub fn draw(&mut self, current_model: &Model, predicted_world: &World, my_player_id: u64,
-                view_dir: Option<ViewDir>, tick: u64, intra_tick: f64, display: &Display) {
+                view_dir: Option<ViewDir>, tick_instant: TickInstant, display: &Display) {
         let current_world = current_model.get_world();
         let my_character_id = current_model.get_player(my_player_id)
                 .and_then(|p| p.get_character_id());
-        if self.current_tick != tick {
+        if self.current_tick != tick_instant.tick {
             self.last_tick = self.current_tick;
             mem::swap(&mut self.last_visual_world, &mut self.current_visual_world);
         }
-        self.current_tick = tick;
+        self.current_tick = tick_instant.tick;
         self.current_visual_world.rebuild(my_character_id, current_world, predicted_world);
 
         let tick_diff = (self.current_tick - self.last_tick) as f64;
         self.mix_world.remix(
             &self.current_visual_world,
             &self.last_visual_world,
-            (tick_diff - 1.0 + intra_tick) / tick_diff
+            (tick_diff - 1.0 + tick_instant.intra_tick) / tick_diff
         );
 
         let character = if let Some(c) = my_character_id.and_then(|id|

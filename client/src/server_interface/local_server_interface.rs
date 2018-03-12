@@ -46,8 +46,8 @@ impl ServerInterface for LocalServerInterface {
                     my_player_id: player_id,
                     tick_info: TickInfo {
                         tick: 0,
-                        tick_time: now,
                         predicted_tick: 0,
+                        tick_time: now,
                         next_tick_time: now + consts::tick_duration(),
                     }
                 };
