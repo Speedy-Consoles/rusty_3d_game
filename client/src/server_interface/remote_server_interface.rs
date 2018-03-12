@@ -29,6 +29,75 @@ use super::TickInfo;
 use self::InternalState::*;
 use self::SnapshotState::*;
 
+struct TickOracle {
+    start_tick_time_avg: Instant, // current estimation of when the first tick would have arrived
+    start_tick_time_var: f64, // variance of the travel times of the snapshots in square seconds
+}
+
+impl TickOracle {
+    fn new(first_tick: u64, first_arrival_time: Instant) -> TickOracle {
+        TickOracle {
+            start_tick_time_avg: first_arrival_time - util::mult_duration(
+                consts::tick_duration(),
+                first_tick,
+            ),
+            start_tick_time_var: 0.0
+        }
+    }
+
+    fn add_tick_arrival(&mut self, tick: u64, arrival_time: Instant) {
+        let start_tick_time = arrival_time - util::mult_duration(
+            consts::tick_duration(),
+            tick,
+        );
+        let old_diff = if start_tick_time > self.start_tick_time_avg {
+            util::duration_as_float(start_tick_time - self.start_tick_time_avg)
+        } else {
+            -util::duration_as_float(self.start_tick_time_avg - start_tick_time)
+        };
+        if old_diff > Self::tick_tolerance_delay_float(self.start_tick_time_var) {
+            println!(
+                "WARNING: Snapshot {} arrived too late! | \
+                    Deviation from mean: {:.2}ms | Tick tolerance delay: {:.2}ms",
+                tick,
+                old_diff * 1000.0,
+                Self::tick_tolerance_delay_float(self.start_tick_time_var) * 1000.0
+            );
+        }
+        self.start_tick_time_avg = self.start_tick_time_avg.mix(
+            &start_tick_time,
+            NEWEST_START_TICK_TIME_WEIGHT
+        );
+        let new_diff = if start_tick_time > self.start_tick_time_avg {
+            util::duration_as_float(start_tick_time - self.start_tick_time_avg)
+        } else {
+            -util::duration_as_float(self.start_tick_time_avg - start_tick_time)
+        };
+        self.start_tick_time_var = self.start_tick_time_var.mix(
+            &(old_diff * new_diff),
+            NEWEST_START_TICK_TIME_DEVIATION_WEIGHT
+        );
+    }
+
+    fn now(&self, time: Instant) -> TickInstant {
+        // tick_tolerance_delay is a confidence interval of the distribution
+        // of the snapshot travel times, with which we delay our ticks
+        // to make it likely that the snapshots will be on time
+        TickInstant::new(
+            self.start_tick_time_avg + Self::tick_tolerance_delay(self.start_tick_time_var),
+            time,
+        )
+    }
+
+    fn tick_tolerance_delay_float(start_tick_time_var: f64) -> f64 {
+        start_tick_time_var.sqrt() * consts::SNAPSHOT_ARRIVAL_SIGMA_FACTOR
+    }
+
+    fn tick_tolerance_delay(start_tick_time_var: f64) -> Duration {
+        util::duration_from_float(Self::tick_tolerance_delay_float(start_tick_time_var))
+    }
+}
+
 struct Network {
     socket: UdpSocket,
 }
@@ -67,9 +136,7 @@ impl Network {
 enum SnapshotState {
     BeforeSnapshot,
     AfterSnapshot {
-        // current estimation of when the first tick would have arrived
-        start_tick_time_avg: Instant,
-        start_tick_time_var: f64, // variance of the travel times of the snapshots
+        tick_oracle: TickOracle,
         snapshots: HashMap<u64, Snapshot>,
         sent_inputs: HashMap<u64, CharacterInput>,
         oldest_snapshot_tick: u64,
@@ -117,15 +184,10 @@ impl RemoteServerInterface {
 
     fn on_snapshot(&mut self, snapshot: Snapshot) {
         let recv_time = Instant::now();
-        let start_tick_time = recv_time - util::mult_duration(
-            consts::tick_duration(),
-            snapshot.tick(),
-        );
         if let Connected { ref mut snapshot_state, .. } = self.internal_state {
             match snapshot_state {
                 &mut BeforeSnapshot => *snapshot_state = AfterSnapshot {
-                    start_tick_time_avg: start_tick_time,
-                    start_tick_time_var: 0.0,
+                    tick_oracle: TickOracle::new(snapshot.tick(), recv_time),
                     tick_info: TickInfo { // not a real tick info :/ but we need one
                         tick: snapshot.tick(),
                         predicted_tick: snapshot.tick(),
@@ -137,40 +199,12 @@ impl RemoteServerInterface {
                     sent_inputs: HashMap::new(),
                 },
                 &mut AfterSnapshot {
-                    ref mut start_tick_time_avg,
-                    ref mut start_tick_time_var,
+                    ref mut tick_oracle,
                     oldest_snapshot_tick,
                     ref mut snapshots,
                     ..
                 } => {
-                    let old_diff = if start_tick_time > *start_tick_time_avg {
-                        util::duration_as_float(start_tick_time - *start_tick_time_avg)
-                    } else {
-                        -util::duration_as_float(*start_tick_time_avg - start_tick_time)
-                    };
-                    if old_diff > Self::tick_tolerance_delay_float(*start_tick_time_var) {
-                        println!(
-                            "WARNING: Snapshot {} arrived too late! | \
-                                Deviation from mean: {:.2}ms | \
-                                Tick tolerance delay: {:.2}ms",
-                            snapshot.tick(),
-                            old_diff * 1000.0,
-                            Self::tick_tolerance_delay_float(*start_tick_time_var) * 1000.0
-                        );
-                    }
-                    *start_tick_time_avg = start_tick_time_avg.mix(
-                        &start_tick_time,
-                        NEWEST_START_TICK_TIME_WEIGHT
-                    );
-                    let new_diff = if start_tick_time > *start_tick_time_avg {
-                        util::duration_as_float(start_tick_time - *start_tick_time_avg)
-                    } else {
-                        -util::duration_as_float(*start_tick_time_avg - start_tick_time)
-                    };
-                    *start_tick_time_var = start_tick_time_var.mix(
-                        &(old_diff * new_diff),
-                        NEWEST_START_TICK_TIME_DEVIATION_WEIGHT
-                    );
+                    tick_oracle.add_tick_arrival(snapshot.tick(), recv_time);
                     if snapshot.tick() > oldest_snapshot_tick {
                         snapshots.insert(snapshot.tick(), snapshot);
                     } else {
@@ -211,14 +245,6 @@ impl RemoteServerInterface {
             EchoResponse(_) => (),
         }
     }
-
-    fn tick_tolerance_delay_float(start_tick_time_var: f64) -> f64 {
-        start_tick_time_var.sqrt() * consts::SNAPSHOT_ARRIVAL_SIGMA_FACTOR
-    }
-
-    fn tick_tolerance_delay(start_tick_time_var: f64) -> Duration {
-        util::duration_from_float(Self::tick_tolerance_delay_float(start_tick_time_var))
-    }
 }
 
 impl ServerInterface for RemoteServerInterface {
@@ -227,8 +253,7 @@ impl ServerInterface for RemoteServerInterface {
         if let Connected {
             my_player_id,
             snapshot_state: AfterSnapshot {
-                start_tick_time_avg,
-                start_tick_time_var,
+                ref tick_oracle,
                 ref mut tick_info,
                 ref mut oldest_snapshot_tick,
                 ref mut snapshots,
@@ -236,14 +261,7 @@ impl ServerInterface for RemoteServerInterface {
             },
         } = self.internal_state {
             tick_info.tick_time = tick_info.next_tick_time;
-            // tick_tolerance_delay is a confidence interval of the distribution
-            // of the snapshot travel times, with which we delay our ticks
-            // to make it likely that the snapshots will be on time
-            let target_tick_instant = TickInstant::new(
-                start_tick_time_avg + Self::tick_tolerance_delay(start_tick_time_var),
-                tick_info.tick_time,
-            );
-
+            let target_tick_instant = tick_oracle.now(tick_info.tick_time);
             tick_info.tick += 1;
             let float_tick_diff = if target_tick_instant.tick > tick_info.tick {
                 let tick_diff = target_tick_instant.tick - tick_info.tick;
@@ -252,6 +270,7 @@ impl ServerInterface for RemoteServerInterface {
                 let tick_diff = tick_info.tick - target_tick_instant.tick;
                 target_tick_instant.intra_tick - (tick_diff as f64)
             };
+
             let param1 = TICK_SPEED as f64 / 4.0;
             let param2 = TICK_SPEED as f64 / 4.0;
             let param3 = 0.2;
