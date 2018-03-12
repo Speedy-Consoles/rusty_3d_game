@@ -2,6 +2,7 @@ mod graphics;
 mod controls;
 mod config;
 mod server_interface;
+mod menu;
 
 #[macro_use] extern crate glium;
 extern crate cgmath;
@@ -30,6 +31,7 @@ use server_interface::LocalServerInterface;
 use server_interface::RemoteServerInterface;
 use server_interface::ConnectionState::*;
 use config::Config;
+use menu::Menu;
 
 pub struct Client {
     events_loop: glutin::EventsLoop,
@@ -39,8 +41,7 @@ pub struct Client {
     config: Config,
     character_input: CharacterInput,
     closing: bool,
-    menu_active: bool,
-    cursor_grabbed: bool,
+    menu: Menu,
 }
 
 impl Client {
@@ -81,8 +82,7 @@ impl Client {
             config,
             character_input: Default::default(),
             closing: false,
-            menu_active: true,
-            cursor_grabbed: false,
+            menu: Menu::new(),
         }
     }
 
@@ -106,7 +106,7 @@ impl Client {
             let before_tick = Instant::now();
             if before_tick >= next_tick_time {
                 let mut character_input = self.character_input;
-                if self.menu_active {
+                if self.menu.active() {
                     character_input = Default::default();
                     character_input.view_dir = self.character_input.view_dir;
                 }
@@ -120,10 +120,7 @@ impl Client {
                 tick_counter += 1;
             }
 
-            if self.menu_active == self.cursor_grabbed {
-                let menu_active = self.menu_active;
-                self.try_set_cursor_grab(!menu_active);
-            }
+            self.update_cursor();
 
             // draw
             let before_draw = Instant::now();
@@ -164,30 +161,17 @@ impl Client {
         }
 
         self.server_interface.disconnect();
-
-        // clean up grab, because it might cause errors otherwise
-        self.try_set_cursor_grab(false);
+        // TODO do proper disconnect
     }
 
-    fn set_menu(&mut self, active: bool) {
-        if active == self.menu_active {
-            return;
-        }
-        self.menu_active = active;
-        if self.menu_active {
-            self.display.gl_window().set_cursor(glutin::MouseCursor::Default);
+    fn update_cursor(&mut self) {
+        let window = self.display.gl_window();
+        if self.menu.active() {
+            window.set_cursor(glutin::MouseCursor::Default);
+            window.set_cursor_state(glutin::CursorState::Grab).is_ok();
         } else {
-            self.display.gl_window().set_cursor(glutin::MouseCursor::NoneCursor);
-        }
-    }
-
-    fn try_set_cursor_grab(&mut self, grab: bool) {
-        if grab {
-            self.cursor_grabbed
-                = self.display.gl_window().set_cursor_state(glutin::CursorState::Grab).is_ok();
-        } else {
-            self.cursor_grabbed
-                = !self.display.gl_window().set_cursor_state(glutin::CursorState::Normal).is_ok();
+            window.set_cursor(glutin::MouseCursor::NoneCursor);
+            window.set_cursor_state(glutin::CursorState::Normal).is_ok();
         }
     }
 
@@ -196,27 +180,29 @@ impl Client {
         use self::glutin::WindowEvent as WE;
         use self::glutin::DeviceEvent as DE;
 
-        let mut events = Vec::new(); // TODO get rid of allocation
-        self.events_loop.poll_events(|ev| events.push(ev));
-        for ev in events {
+        let graphics = &mut self.graphics;
+        let closing = &mut self.closing;
+        let menu = &mut self.menu;
+        let config = &mut self.config;
+        self.events_loop.poll_events(|ev| {
             match ev {
                 // Window events are only received if the window has focus
                 WindowEvent { event: wev, .. } => match wev {
                     WE::Resized(width, height) =>
-                        self.graphics.set_view_port(width as u64, height as u64),
-                    WE::Closed => self.closing = true,
+                        graphics.set_view_port(width as u64, height as u64),
+                    WE::Closed => *closing = true,
                     WE::DroppedFile(buf) => println!("File dropped: {:?}", buf),
                     WE::HoveredFile(buf) => println!("File hovered: {:?}", buf),
                     WE::HoveredFileCancelled => println!("File hover canceled"),
                     WE::ReceivedCharacter(_c) => (), // TODO handle chat
-                    WE::Focused(false) => self.set_menu(true),
+                    WE::Focused(false) => menu.set_active(true),
                     WE::KeyboardInput { device_id, input } =>
-                        self.config.controls.process_keyboard_input_event(device_id, input),
+                        config.controls.process_keyboard_input_event(device_id, input),
                     WE::MouseInput { device_id, state, button, modifiers } =>
-                        self.config.controls.process_mouse_input_event(device_id, state,
+                        config.controls.process_mouse_input_event(device_id, state,
                                                                 button, modifiers),
                     WE::MouseWheel {device_id, delta, phase, modifiers} =>
-                        self.config.controls
+                        config.controls
                             .process_mouse_wheel_event(device_id, delta, phase, modifiers),
                     // CursorMoved positions have sub-pixel precision,
                     // but cursor is likely displayed at the rounded-down integer position
@@ -226,12 +212,12 @@ impl Client {
                 // Device events are received any time independently of the window focus
                 DeviceEvent { device_id, event } =>
                     if let DE::Motion { axis, value } = event {
-                        self.config.controls.process_motion_event(device_id, axis, value);
+                        config.controls.process_motion_event(device_id, axis, value);
                     },
                 Awakened => println!("Event::Awakened"),
                 Suspended(sus) => println!("Event::Suspended({})", sus),
             }
-        };
+        });
     }
 
     fn handle_controls(&mut self) {
@@ -251,8 +237,8 @@ impl Client {
                         NextWeapon => println!("next weapon"),
                         PrevWeapon => println!("previous weapon"),
                         ToggleMenu => {
-                            let menu_active = self.menu_active;
-                            self.set_menu(!menu_active);
+                            let menu_active = self.menu.active();
+                            self.menu.set_active(!menu_active);
                         },
                         Exit => self.closing = true,
                     }
@@ -270,7 +256,7 @@ impl Client {
                 }
             }
         }
-        if !self.menu_active {
+        if !self.menu.active() {
             self.character_input.view_dir.add_yaw(FPAngle::from_tau_float(yaw_delta));
             self.character_input.view_dir.add_pitch(FPAngle::from_tau_float(pitch_delta));
         }
