@@ -153,7 +153,11 @@ impl Server {
                         client.inputs.insert(tick, input);
                         // TODO ignore insanely high ticks
                     } else {
-                        println!("Input came too late!");
+                        println!(
+                            "Input came too late! | Current tick: {} | Target tick: {}",
+                            self.tick,
+                            tick,
+                        );
                     }
                 }
             },

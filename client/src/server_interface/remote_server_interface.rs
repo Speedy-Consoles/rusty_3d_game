@@ -10,7 +10,9 @@ use std::ops::Sub;
 use std::ops::Add;
 
 use shared::tick_time::TickInstant;
+use shared::tick_time::TickRate;
 use shared::model::Model;
+use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
 use shared::net::ServerMessage;
 use shared::net::ClientMessage;
@@ -136,6 +138,8 @@ enum SnapshotState {
         sent_inputs: HashMap<u64, CharacterInput>,
         oldest_snapshot_tick: u64,
         tick_info: TickInfo,
+        model: Model,
+        predicted_world: World,
     }
 }
 
@@ -186,10 +190,11 @@ impl RemoteServerInterface {
                     start_tick_time_distribution: OnlineDistribution::new(start_tick_time),
                     tick_info: TickInfo { // not a real tick info :/ but we need one
                         tick: snapshot.tick(),
-                        predicted_tick: snapshot.tick(),
                         tick_time: recv_time,
                         next_tick_time: recv_time, // must not lie in the future
                     },
+                    model: Model::new(), // maybe don't initialize this yet
+                    predicted_world: World::new(), // maybe don't initialize this yet
                     oldest_snapshot_tick: snapshot.tick(),
                     snapshots: iter::once((snapshot.tick(), snapshot)).collect(),
                     sent_inputs: HashMap::new(),
@@ -244,8 +249,7 @@ impl RemoteServerInterface {
 }
 
 impl ServerInterface for RemoteServerInterface {
-    fn do_tick(&mut self, model: &mut Model, character_input: CharacterInput) {
-        let tick_lag = 20;// TODO use adaptive delay and prevent predicted tick decreasing
+    fn do_tick(&mut self, character_input: CharacterInput) {
         if let Connected {
             my_player_id,
             snapshot_state: AfterSnapshot {
@@ -254,6 +258,8 @@ impl ServerInterface for RemoteServerInterface {
                 ref mut oldest_snapshot_tick,
                 ref mut snapshots,
                 ref mut sent_inputs,
+                ref mut model,
+                ref mut predicted_world,
             },
         } = self.internal_state {
             // we add a multiple of the standard deviation of the snapshot arrival time distribution
@@ -274,31 +280,34 @@ impl ServerInterface for RemoteServerInterface {
                 target_tick_instant.intra_tick - (tick_diff as f64)
             };
 
-            // TODO change stick speed instead of tick duration
-            let param1 = TICK_SPEED.per_second() as f64 / 4.0;
-            let param2 = TICK_SPEED.per_second() as f64 / 4.0;
-            let param3 = 0.2;
-            let duration_factor;
-            if float_tick_diff < 0.0 {
-                duration_factor = (-float_tick_diff / param1 + 1.0).min(2.0);
-            } else if float_tick_diff <= param2 {
-                duration_factor = 1.0 - float_tick_diff / param2 * param3;
+            let min_factor = 0.5;
+            let max_factor = 2.0;
+            let factor_factor = 0.05;
+            let jump_threshold = 30.0;
+            let mut speed_factor;
+            if float_tick_diff < jump_threshold {
+                speed_factor = 1.0 + float_tick_diff * factor_factor
             } else {
                 println!("WARNING: Jumping from {} to {}!",
                      tick_info.tick,
                      target_tick_instant.tick
                 );
                 tick_info.tick = target_tick_instant.tick;
-                duration_factor = 1.0;
-            }
-            tick_info.next_tick_time = tick_info.tick_time + duration_factor / TICK_SPEED;
-            tick_info.predicted_tick = tick_info.tick + tick_lag;
+                speed_factor = 1.0;
+            };
+            speed_factor = speed_factor.min(max_factor).max(min_factor);
+            let tick_rate = TickRate::from_per_second(
+                (TICK_SPEED.per_second() as f64 * speed_factor) as u64
+            );
+            tick_info.next_tick_time = tick_info.tick_time + 1 / tick_rate;
+
+            let predicted_tick = tick_info.tick + 20; // TODO use adaptive delay and prevent predicted tick decreasing
 
             // remove old snapshots and inputs
             {
                 let mut new_oldest_snapshot_tick = *oldest_snapshot_tick;
                 let mut t = tick_info.tick;
-                while t >= *oldest_snapshot_tick {
+                while t > *oldest_snapshot_tick {
                     if snapshots.contains_key(&t) {
                         new_oldest_snapshot_tick = t;
                         break;
@@ -318,10 +327,9 @@ impl ServerInterface for RemoteServerInterface {
             }
 
             // send input
-            let input_tick = tick_info.predicted_tick;
-            let msg = ClientMessage::Input { tick: input_tick, input: character_input };
+            let msg = ClientMessage::Input { tick: predicted_tick, input: character_input };
             self.network.send(msg);
-            sent_inputs.insert(input_tick, character_input);
+            sent_inputs.insert(predicted_tick, character_input);
 
             // update model
             let oldest_snapshot = snapshots.get(oldest_snapshot_tick).unwrap();
@@ -330,7 +338,7 @@ impl ServerInterface for RemoteServerInterface {
             if tick_diff > 0 {
                 println!(
                     "WARNING: {} ticks ahead of snapshots! | \
-                        Current tick: {} Tick of last snapshot: {} | \
+                        Current tick: {} Tick of oldest snapshot: {} | \
                         Target tick: {}",
                     tick_diff, tick_info.tick, *oldest_snapshot_tick, target_tick_instant.tick
                 );
@@ -341,10 +349,19 @@ impl ServerInterface for RemoteServerInterface {
                 }
                 model.do_tick();
             }
+
+            *predicted_world = model.world().clone();
+            for tick in (tick_info.tick + 1)..(predicted_tick + 1) {
+                if let Some(&input) = sent_inputs.get(&tick) {
+                    predicted_world.set_character_input(my_player_id, input);
+                }
+                predicted_world.do_tick();
+            }
         }
     }
 
     fn handle_traffic(&mut self, until: Instant) {
+        // TODO guarantee to empty the socket
         loop {
             let now = Instant::now();
             if until <= now {
@@ -362,19 +379,18 @@ impl ServerInterface for RemoteServerInterface {
                 => ConnectionState::Connecting,
             Disconnecting => ConnectionState::Disconnecting,
             Disconnected => ConnectionState::Disconnected,
-            Connected { my_player_id, snapshot_state: AfterSnapshot { tick_info, .. } }
-                => ConnectionState::Connected { my_player_id, tick_info }
-        }
-    }
-
-    fn character_input(&self, tick: u64) -> Option<CharacterInput> {
-        if let Connected {
-            snapshot_state: AfterSnapshot { ref sent_inputs, .. },
-            ..
-        } = self.internal_state {
-            sent_inputs.get(&tick).map(|input| *input)
-        } else {
-            None
+            Connected { my_player_id, snapshot_state: AfterSnapshot {
+                    tick_info,
+                    ref model,
+                    ref predicted_world,
+                    ..
+                }
+            } => ConnectionState::Connected {
+                my_player_id,
+                tick_info,
+                model,
+                predicted_world,
+            }
         }
     }
 

@@ -22,8 +22,6 @@ use glium::backend::glutin::Display;
 use shared::math::FPAngle;
 use shared::consts::TICK_SPEED;
 use shared::consts::DRAW_SPEED;
-use shared::model::Model;
-use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
 
 use graphics::Graphics;
@@ -39,8 +37,6 @@ pub struct Client {
     graphics: Graphics,
     display: Display,
     config: Config,
-    model: Model,
-    predicted_world: World,
     character_input: CharacterInput,
     closing: bool,
     menu_active: bool,
@@ -83,8 +79,6 @@ impl Client {
             graphics: Graphics::new(&display),
             display,
             config,
-            model: Model::new(),
-            predicted_world: World::new(),
             character_input: Default::default(),
             closing: false,
             menu_active: true,
@@ -116,11 +110,9 @@ impl Client {
                     character_input = Default::default();
                     character_input.view_dir = self.character_input.view_dir;
                 }
-                self.server_interface.do_tick(&mut self.model, character_input);
+                self.server_interface.do_tick(character_input);
                 self.character_input.reset_flags();
-                if let Connected { tick_info, my_player_id }
-                        = self.server_interface.connection_state() {
-                    self.predict(tick_info.tick, tick_info.predicted_tick, my_player_id);
+                if let Connected { tick_info, .. } = self.server_interface.connection_state() {
                     next_tick_time = tick_info.next_tick_time;
                 } else {
                     next_tick_time = next_tick_time + 1 / TICK_SPEED;
@@ -136,7 +128,7 @@ impl Client {
             // draw
             let before_draw = Instant::now();
             if before_draw >= next_draw_time {
-                if let Connected { tick_info, my_player_id }
+                if let Connected { tick_info, my_player_id, model, predicted_world }
                         = self.server_interface.connection_state() {
                     let view_dir = if self.config.direct_camera {
                         Some(self.character_input.view_dir)
@@ -145,8 +137,8 @@ impl Client {
                     };
 
                     self.graphics.draw(
-                        &self.model,
-                        &self.predicted_world,
+                        model,
+                        predicted_world,
                         my_player_id,
                         view_dir,
                         tick_info.now(),
@@ -196,16 +188,6 @@ impl Client {
         } else {
             self.cursor_grabbed
                 = !self.display.gl_window().set_cursor_state(glutin::CursorState::Normal).is_ok();
-        }
-    }
-
-    fn predict(&mut self, current_tick: u64, predicted_tick: u64, my_player_id: u64) {
-        self.predicted_world = self.model.world().clone();
-        for tick in (current_tick + 1)..(predicted_tick + 1) {
-            if let Some(input) = self.server_interface.character_input(tick) {
-                self.predicted_world.set_character_input(my_player_id, input);
-            }
-            self.predicted_world.do_tick();
         }
     }
 

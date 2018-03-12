@@ -6,17 +6,20 @@ use std::time::Instant;
 use shared::tick_time::TickInstant;
 use shared::util;
 use shared::model::Model;
+use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
 
 pub use self::local_server_interface::*;
 pub use self::remote_server_interface::*;
 
 #[derive(Clone, Copy)]
-pub enum ConnectionState {
+pub enum ConnectionState<'a> {
     Connecting,
     Connected {
         my_player_id: u64,
         tick_info: TickInfo,
+        model: &'a Model,
+        predicted_world: &'a World,
     },
     Disconnecting,
     Disconnected,
@@ -25,7 +28,6 @@ pub enum ConnectionState {
 #[derive(Debug, Clone, Copy)]
 pub struct TickInfo {
     pub tick: u64,
-    pub predicted_tick: u64,
     pub tick_time: Instant,
     pub next_tick_time: Instant,
 }
@@ -42,9 +44,8 @@ impl TickInfo {
 }
 
 pub trait ServerInterface {
-    fn do_tick(&mut self, model: &mut Model, input: CharacterInput);
+    fn do_tick(&mut self, input: CharacterInput);
     fn handle_traffic(&mut self, until: Instant);
     fn connection_state(&self) -> ConnectionState;
-    fn character_input(&self, tick: u64) -> Option<CharacterInput>;
     fn disconnect(&mut self);
 }

@@ -16,6 +16,7 @@ enum InternalState {
         start_tick_time: Instant,
         my_player_id: u64,
         tick_info: TickInfo,
+        model: Model,
     },
     AfterDisconnect,
 }
@@ -32,40 +33,40 @@ impl LocalServerInterface {
 }
 
 impl ServerInterface for LocalServerInterface {
-    fn do_tick(&mut self, model: &mut Model, input: CharacterInput) {
+    fn do_tick(&mut self, input: CharacterInput) {
         let tick_diff;
-        let player_id;
         match self.internal_state {
             BeforeFirstTick => {
-                player_id = model.add_player(String::from("Player"));
-                tick_diff = 1;
                 let now = Instant::now();
+                let mut model = Model::new();
+                let my_player_id = model.add_player(String::from("Player"));
+                model.set_character_input(my_player_id, input);
+                model.do_tick();
+
                 self.internal_state = AfterFirstTick {
                     start_tick_time: now,
-                    my_player_id: player_id,
+                    my_player_id,
                     tick_info: TickInfo {
                         tick: 0,
-                        predicted_tick: 0,
                         tick_time: now,
                         next_tick_time: now + 1 / TICK_SPEED,
-                    }
+                    },
+                    model,
                 };
             },
-            AfterFirstTick { start_tick_time, my_player_id, ref mut tick_info } => {
-                player_id = my_player_id;
+            AfterFirstTick { start_tick_time, my_player_id, ref mut tick_info, ref mut model } => {
                 let prev_tick = tick_info.tick;
                 tick_info.tick += 1; // TODO allow tick skipping
-                tick_info.predicted_tick = tick_info.tick;
                 tick_info.tick_time = tick_info.next_tick_time;
                 tick_info.next_tick_time = start_tick_time + (tick_info.tick + 1) / TICK_SPEED;
                 tick_diff = tick_info.tick - prev_tick;
-            },
-            AfterDisconnect => return,
-        }
 
-        for _ in 0..tick_diff {
-            model.set_character_input(player_id, input);
-            model.do_tick();
+                model.set_character_input(my_player_id, input);
+                for _ in 0..tick_diff {
+                    model.do_tick();
+                }
+            },
+            AfterDisconnect => (),
         }
     }
 
@@ -82,14 +83,15 @@ impl ServerInterface for LocalServerInterface {
     fn connection_state(&self) -> ConnectionState {
         match self.internal_state {
             BeforeFirstTick => ConnectionState::Connecting,
-            AfterFirstTick { my_player_id, tick_info, .. }
-            => ConnectionState::Connected { my_player_id, tick_info },
+            AfterFirstTick { my_player_id, tick_info, ref model, .. }
+            => ConnectionState::Connected {
+                my_player_id,
+                tick_info,
+                model,
+                predicted_world: model.world(),
+            },
             AfterDisconnect => ConnectionState::Disconnected,
         }
-    }
-
-    fn character_input(&self, _tick: u64) -> Option<CharacterInput> {
-        None
     }
 
     fn disconnect(&mut self) {
