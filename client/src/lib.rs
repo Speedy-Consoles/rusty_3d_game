@@ -172,10 +172,10 @@ impl Client {
         let window = self.display.gl_window();
         if self.menu.active() {
             window.set_cursor(glutin::MouseCursor::Default);
-            window.set_cursor_state(glutin::CursorState::Grab).is_ok();
+            window.set_cursor_state(glutin::CursorState::Normal).is_ok();
         } else {
             window.set_cursor(glutin::MouseCursor::NoneCursor);
-            window.set_cursor_state(glutin::CursorState::Normal).is_ok();
+            window.set_cursor_state(glutin::CursorState::Grab).is_ok();
         }
     }
 
