@@ -1,8 +1,8 @@
 mod targets;
 mod triggers;
 
-use std;
 use std::collections::VecDeque;
+use std::collections::vec_deque::Drain;
 use std::collections::HashMap;
 use std::collections::BTreeSet;
 use std::collections::BTreeMap;
@@ -273,10 +273,8 @@ impl Controls {
         }
     }
 
-    pub fn events(&mut self) -> Vec<ControlEvent> {
-        let mut events = VecDeque::new();// TODO get rid of allocation
-        std::mem::swap(&mut events, &mut self.events);
-        events.into()
+    pub fn events(&mut self) -> Drain<ControlEvent> {
+        self.events.drain(..)
     }
 
     pub fn switch_target_state(&self, target: SwitchTarget) -> SwitchState {
