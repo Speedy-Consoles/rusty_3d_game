@@ -103,11 +103,11 @@ impl Server {
     fn remove_clients(&mut self) {
         // TODO find a way to move the reason instead of copying it
         for (&id, &reason) in self.to_remove_clients.iter() {
-            let name = self.model.remove_player(id).unwrap().take_name();
-            let msg = ServerMessage::PlayerDisconnect { id, name, reason };
-            self.broadcast(msg);
+            let _name = self.model.remove_player(id).unwrap().take_name(); // TODO for leave message
             let client = self.clients.remove(&id).unwrap();
             self.clients_id_by_addr.remove(&client.addr).unwrap();
+            let msg = ServerMessage::ConnectionClose(reason);
+            self.send_to(msg, client.addr);
         }
         self.to_remove_clients.clear();
     }
@@ -145,7 +145,6 @@ impl Server {
                 self.clients_id_by_addr.insert(src, new_id);
                 self.send_to(ServerMessage::ConnectionConfirm(new_id), src);
             },
-            ClientMessage::EchoRequest(id) => self.send_to(ServerMessage::EchoResponse(id), src),
             ClientMessage::Input { tick, input } => {
                 if let Some(id) = id_option {
                     let client = self.clients.get_mut(&id).unwrap();
@@ -161,9 +160,9 @@ impl Server {
                     }
                 }
             },
-            ClientMessage::Leave => {
+            ClientMessage::DisconnectRequest => {
                 if let Some(id) = id_option {
-                    self.to_remove_clients.insert(id, DisconnectReason::Disconnected);
+                    self.to_remove_clients.insert(id, DisconnectReason::UserDisconnect);
                 }
             },
         }

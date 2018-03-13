@@ -216,34 +216,36 @@ impl RemoteServerInterface {
         }
     }
 
-    fn handle_message(&mut self, msg: ServerMessage) {
-        use shared::net::ServerMessage::*;
-        match msg {
-            ConnectionConfirm(my_player_id) => self.internal_state = Connected {
+    fn on_connection_confirm(&mut self, my_player_id: u64) {
+        match self.internal_state {
+            Connecting => self.internal_state = Connected {
                 my_player_id,
                 snapshot_state: BeforeSnapshot,
             },
-            Snapshot(s) => self.on_snapshot(s),
-            PlayerDisconnect { id, name, reason } => {
-                match self.internal_state {
-                    Connected { my_player_id, .. } if my_player_id == id => {
-                        if let DisconnectReason::Kicked = reason {
-                             println!("You were kicked.");
-                        }
-                        self.internal_state = Disconnected;
-                    },
-                    Connected { .. } => {
-                        let reason_str = match reason {
-                            DisconnectReason::Disconnected => "left",
-                            DisconnectReason::TimedOut => "timed out",
-                            DisconnectReason::Kicked => "was kicked",
-                        };
-                        println!("{} {}.", name, reason_str);
-                    },
-                    _ => ()
+            Connected { .. } | Disconnecting | Disconnected => (),
+        }
+    }
+
+    fn on_connection_close(&mut self, reason: DisconnectReason) {
+        match self.internal_state {
+            Connecting | Disconnecting | Connected { .. } => {
+                match reason {
+                    DisconnectReason::Kicked => println!("You were kicked."),
+                    DisconnectReason::TimedOut => println!("You timed out."),
+                    DisconnectReason::UserDisconnect => println!("You left."),
                 }
+                self.internal_state = Disconnected;
             },
-            EchoResponse(_) => (),
+            Disconnected => (),
+        }
+    }
+
+    fn handle_message(&mut self, msg: ServerMessage) {
+        use shared::net::ServerMessage::*;
+        match msg {
+            ConnectionConfirm(my_player_id) => self.on_connection_confirm(my_player_id),
+            ConnectionClose(reason) => self.on_connection_close(reason),
+            Snapshot(s) => self.on_snapshot(s),
         }
     }
 }
@@ -395,7 +397,16 @@ impl ServerInterface for RemoteServerInterface {
     }
 
     fn disconnect(&mut self) {
-        self.network.send(ClientMessage::Leave);
-        self.internal_state = Disconnecting;
+        match self.internal_state {
+            Connecting => {
+                self.network.send(ClientMessage::DisconnectRequest);
+                self.internal_state = Disconnected;
+            },
+            Connected { .. } => {
+                self.network.send(ClientMessage::DisconnectRequest);
+                self.internal_state = Disconnecting;
+            },
+            Disconnecting | Disconnected => (),
+        }
     }
 }

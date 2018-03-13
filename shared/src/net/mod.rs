@@ -34,9 +34,8 @@ impl<'a, T: Serialize + Deserialize<'a>> Packable<'a> for T {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     ConnectionRequest,
+    DisconnectRequest,
     Input { tick: u64, input: CharacterInput, },
-    EchoRequest(u64),
-    Leave,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -81,14 +80,13 @@ impl PartialOrd for Snapshot {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     ConnectionConfirm(u64),
-    EchoResponse(u64),
-    PlayerDisconnect { id: u64, name: String, reason: DisconnectReason }, // TODO give string max length
+    ConnectionClose(DisconnectReason),
     Snapshot(Snapshot),
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)] // TODO find a way to not make this Copy
 pub enum DisconnectReason {
-    Disconnected,
+    UserDisconnect,
     TimedOut,
     Kicked,
 }

@@ -97,7 +97,7 @@ impl Client {
         let mut next_tick_time = Instant::now();
 
         // main loop
-        while !self.closing {
+        loop {
             // events
             self.handle_events();
             self.handle_controls();
@@ -158,10 +158,14 @@ impl Client {
 
             // sleep / handle traffic
             self.server_interface.handle_traffic(next_tick_time.min(next_draw_time));
-        }
 
-        self.server_interface.disconnect();
-        // TODO do proper disconnect
+            if self.closing {
+                self.server_interface.disconnect();
+                if let Disconnected = self.server_interface.connection_state() {
+                    break;
+                }
+            }
+        }
     }
 
     fn update_cursor(&mut self) {
