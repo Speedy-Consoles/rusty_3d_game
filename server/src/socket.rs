@@ -8,19 +8,19 @@ use std::collections::HashMap;
 use net2::UdpBuilder;
 
 use shared::net::ClientMessage;
-use shared::net::ConnectedClientMessage;
-use shared::net::NonconnectedClientMessage;
+use shared::net::ConClientMessage;
+use shared::net::ConLessClientMessage;
 use shared::net::ServerMessage;
-use shared::net::ConnectedServerMessage;
-use shared::net::NonconnectedServerMessage;
+use shared::net::ConServerMessage;
+use shared::net::ConLessServerMessage;
 use shared::net::Packable;
 use shared::net::MAX_MESSAGE_LENGTH;
 
 use self::CheckedClientMessage::*;
 
 pub enum CheckedClientMessage {
-    Unknown(NonconnectedClientMessage, SocketAddr),
-    Known(ConnectedClientMessage, u64),
+    Connected(ConLessClientMessage, SocketAddr),
+    Connectionless(ConClientMessage, u64),
 }
 
 pub struct Socket {
@@ -55,25 +55,25 @@ impl Socket {
         self.client_ids_by_addr.get(&addr).map(|id| *id)
     }
 
-    pub fn send_to_connected(&self, message: ConnectedServerMessage, id: u64) {
+    pub fn send_to_connected(&self, msg: ConServerMessage, id: u64) {
         let addr = self.client_addrs_by_id.get(&id).unwrap();
-        self.send_to(&ServerMessage::Connected(message), *addr);
+        self.send_to(&ServerMessage::Connected(msg), *addr);
     }
 
-    pub fn send_to_nonconnected(&self, message: NonconnectedServerMessage, addr: SocketAddr) {
-        self.send_to(&ServerMessage::Nonconnected(message), addr);
+    pub fn send_to_connectionless(&self, msg: ConLessServerMessage, addr: SocketAddr) {
+        self.send_to(&ServerMessage::Connectionless(msg), addr);
     }
 
-    fn send_to(&self, message: &ServerMessage, addr: SocketAddr) {
+    fn send_to(&self, msg: &ServerMessage, addr: SocketAddr) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
-        let amount = message.pack(&mut buf).unwrap();
+        let amount = msg.pack(&mut buf).unwrap();
         self.udp_socket.send_to(&buf[..amount], addr).unwrap();
     }
 
-    pub fn broadcast(&self, message: ConnectedServerMessage) {
-        let msg = ServerMessage::Connected(message);
+    pub fn broadcast(&self, msg: ConServerMessage) {
+        let cmsg = ServerMessage::Connected(msg);
         for addr in self.client_ids_by_addr.keys() {
-            self.send_to(&msg, *addr);
+            self.send_to(&cmsg, *addr);
         }
     }
 
@@ -106,15 +106,15 @@ impl Socket {
                     match ClientMessage::unpack(&buf[..amount]) {
                         Ok(ClientMessage::Connected(msg)) => {
                             if let Some(id) = self.client_ids_by_addr.get(&addr) {
-                                return Ok(Some(Known(msg, *id)));
+                                return Ok(Some(Connectionless(msg, *id)));
                             } else {
                                 println!("WARNING: Received connectionful message \
                                          without connection!");
                                 // TODO send connection reset
                             }
                         },
-                        Ok(ClientMessage::Nonconnected(msg)) => {
-                            return Ok(Some(Unknown(msg, addr)));
+                        Ok(ClientMessage::Connectionless(msg)) => {
+                            return Ok(Some(Connected(msg, addr)));
                         },
                         Err(e) => println!(
                             "DEBUG: Received malformed message. Unpack error: {:?}",

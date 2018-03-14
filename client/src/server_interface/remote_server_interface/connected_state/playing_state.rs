@@ -10,7 +10,7 @@ use shared::tick_time::TickRate;
 use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
-use shared::net::ConnectedClientMessage;
+use shared::net::ConClientMessage;
 use shared::net::Snapshot;
 use shared::consts::TICK_SPEED;
 use shared::consts::NEWEST_START_TICK_TIME_WEIGHT;
@@ -78,7 +78,7 @@ impl<T> OnlineDistribution<T> where T:
     }
 }
 
-pub struct AfterSnapshotState {
+pub struct PlayingState {
     my_player_id: u64,
     start_tick_time_distribution: OnlineDistribution<Instant>,
     snapshots: HashMap<u64, Snapshot>,
@@ -90,10 +90,10 @@ pub struct AfterSnapshotState {
     predicted_world: World,
 }
 
-impl AfterSnapshotState {
-    pub fn new(my_player_id: u64, snapshot: Snapshot, recv_time: Instant) -> AfterSnapshotState {
+impl PlayingState {
+    pub fn new(my_player_id: u64, snapshot: Snapshot, recv_time: Instant) -> PlayingState {
         let start_tick_time = recv_time - snapshot.tick() / TICK_SPEED;
-        AfterSnapshotState {
+        PlayingState {
             my_player_id,
             start_tick_time_distribution: OnlineDistribution::new(start_tick_time),
             tick_info: TickInfo { // not a real tick info :/ but we need one
@@ -220,7 +220,7 @@ impl AfterSnapshotState {
     }
 
     fn send_and_save_input(&mut self, socket: &Socket, character_input: CharacterInput) {
-        let msg = ConnectedClientMessage::Input {
+        let msg = ConClientMessage::Input {
             tick: self.predicted_tick,
             input: character_input
         };

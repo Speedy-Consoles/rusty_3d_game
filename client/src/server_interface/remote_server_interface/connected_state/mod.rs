@@ -1,58 +1,58 @@
-mod after_snapshot_state;
+mod playing_state;
 
 use std::time::Instant;
 
 use shared::model::world::character::CharacterInput;
-use shared::net::ConnectedServerMessage;
+use shared::net::ConServerMessage;
 
 use server_interface::ConnectionState;
 use server_interface::remote_server_interface::socket::Socket;
 
 use self::ConnectedState::*;
-use self::after_snapshot_state::AfterSnapshotState;
+use self::playing_state::PlayingState;
 
 pub enum ConnectedState {
-    BeforeSnapshot {
+    WaitingForSnapshot {
         my_player_id: u64,
     },
-    AfterSnapshot(AfterSnapshotState),
+    Playing(PlayingState),
 }
 
 impl ConnectedState {
     pub fn new(my_player_id: u64) -> ConnectedState {
-        BeforeSnapshot { my_player_id }
+        WaitingForSnapshot { my_player_id }
     }
 
     pub fn do_tick(&mut self, network: &Socket, character_input: CharacterInput) {
         match self {
-            &mut BeforeSnapshot { .. } => (),
-            &mut AfterSnapshot(ref mut state) => state.do_tick(network, character_input),
+            &mut WaitingForSnapshot { .. } => (),
+            &mut Playing(ref mut state) => state.do_tick(network, character_input),
         }
     }
 
-    pub fn handle_message(&mut self, msg: ConnectedServerMessage) {
+    pub fn handle_message(&mut self, msg: ConServerMessage) {
         let recv_time = Instant::now();
         match msg {
-            ConnectedServerMessage::Snapshot(snapshot) => match self {
-                &mut BeforeSnapshot { my_player_id } => {
-                    *self = AfterSnapshot(AfterSnapshotState::new(
+            ConServerMessage::Snapshot(snapshot) => match self {
+                &mut WaitingForSnapshot { my_player_id } => {
+                    *self = Playing(PlayingState::new(
                         my_player_id,
                         snapshot,
                         recv_time,
                     ));
                 },
-                &mut AfterSnapshot(ref mut after_snapshot_state) => {
+                &mut Playing(ref mut after_snapshot_state) => {
                     after_snapshot_state.on_snapshot(snapshot, recv_time);
                 }
             },
-            ConnectedServerMessage::ConnectionClose(_) => (), // will not happen
+            ConServerMessage::ConnectionClose(_) => (), // will not happen
         }
     }
 
     pub fn connection_state(&self) -> ConnectionState {
         match self {
-            &BeforeSnapshot { .. } => ConnectionState::Connecting,
-            &AfterSnapshot(ref state) => state.connection_state(),
+            &WaitingForSnapshot { .. } => ConnectionState::Connecting,
+            &Playing(ref state) => state.connection_state(),
         }
     }
 }

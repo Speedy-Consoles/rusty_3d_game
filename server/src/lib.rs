@@ -13,10 +13,10 @@ use shared::consts;
 use shared::consts::TICK_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
-use shared::net::ConnectedClientMessage;
-use shared::net::NonconnectedClientMessage;
-use shared::net::ConnectedServerMessage;
-use shared::net::NonconnectedServerMessage;
+use shared::net::ConClientMessage;
+use shared::net::ConLessClientMessage;
+use shared::net::ConServerMessage;
+use shared::net::ConLessServerMessage;
 use shared::net::Snapshot;
 use shared::net::ConnectionCloseReason;
 
@@ -71,7 +71,7 @@ impl Server {
                 }
             }
             self.model.do_tick();
-            let msg = ConnectedServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
+            let msg = ConServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
             self.socket.broadcast(msg);
             next_tick_time = start_tick_time + (self.tick + 1) / TICK_SPEED;
             tick_counter += 1;
@@ -104,7 +104,7 @@ impl Server {
         for (&id, &reason) in self.to_remove_clients.iter() {
             let _name = self.model.remove_player(id).unwrap().take_name(); // TODO for leave message
             self.clients.remove(&id);
-            let msg = ConnectedServerMessage::ConnectionClose(reason);
+            let msg = ConServerMessage::ConnectionClose(reason);
             self.socket.send_to_connected(msg, id);
             self.socket.remove_client(id);
         }
@@ -133,9 +133,9 @@ impl Server {
     fn handle_message(&mut self, message: CheckedClientMessage) {
         let recv_time = Instant::now();
         match message {
-            CheckedClientMessage::Unknown(msg, addr) => {
+            CheckedClientMessage::Connected(msg, addr) => {
                 match msg {
-                    NonconnectedClientMessage::ConnectionRequest => {
+                    ConLessClientMessage::ConnectionRequest => {
                         if let Some(_id) = self.socket.client_id_by_addr(addr) {
                             // TODO send another connection confirm to client and reset their connection meta data
                         } else {
@@ -145,18 +145,18 @@ impl Server {
                                 last_msg_time: recv_time,
                             });
                             self.socket.add_client(new_id, addr);
-                            self.socket.send_to_nonconnected(
-                                NonconnectedServerMessage::ConnectionConfirm(new_id),
+                            self.socket.send_to_connectionless(
+                                ConLessServerMessage::ConnectionConfirm(new_id),
                                 addr,
                             );
                         }
                     },
                 }
             },
-            CheckedClientMessage::Known(msg, id) => {
+            CheckedClientMessage::Connectionless(msg, id) => {
                 self.clients.get_mut(&id).unwrap().last_msg_time = recv_time;
                 match msg {
-                    ConnectedClientMessage::Input { tick, input } => {
+                    ConClientMessage::Input { tick, input } => {
                         let client = self.clients.get_mut(&id).unwrap();
                         if tick > self.tick {
                             client.inputs.insert(tick, input);
@@ -169,7 +169,7 @@ impl Server {
                             );
                         }
                     },
-                    ConnectedClientMessage::DisconnectRequest => {
+                    ConClientMessage::DisconnectRequest => {
                         self.to_remove_clients.insert(id, ConnectionCloseReason::UserDisconnect);
                     },
                 }

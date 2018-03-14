@@ -8,10 +8,10 @@ use std::thread;
 
 use shared::model::world::character::CharacterInput;
 use shared::net::ServerMessage;
-use shared::net::ConnectedServerMessage;
-use shared::net::NonconnectedServerMessage;
-use shared::net::ConnectedClientMessage;
-use shared::net::NonconnectedClientMessage;
+use shared::net::ConServerMessage;
+use shared::net::ConLessServerMessage;
+use shared::net::ConClientMessage;
+use shared::net::ConLessClientMessage;
 use shared::net::ConnectionCloseReason;
 use shared::net::ConnectionCloseReason::*;
 
@@ -25,7 +25,7 @@ use self::socket::Socket;
 enum InternalState {
     ConnectionRequestSent,
     Connected(ConnectedState),
-    LeaveSent,
+    DisconnectRequestSent,
     ConnectionClosed(ConnectionCloseReason),
     NetworkError(io::Error),
 }
@@ -38,7 +38,7 @@ pub struct RemoteServerInterface {
 impl RemoteServerInterface {
     pub fn new(addr: SocketAddr) -> io::Result<RemoteServerInterface> {
         let socket = Socket::new(addr)?;
-        socket.send_nonconnected(NonconnectedClientMessage::ConnectionRequest);
+        socket.send_connectionless(ConLessClientMessage::ConnectionRequest);
         Ok(RemoteServerInterface {
             socket,
             internal_state: ConnectionRequestSent,
@@ -48,7 +48,7 @@ impl RemoteServerInterface {
     fn handle_message(&mut self, message: ServerMessage) {
         match message {
             ServerMessage::Connected(msg) => {
-                if let ConnectedServerMessage::ConnectionClose(reason) = msg {
+                if let ConServerMessage::ConnectionClose(reason) = msg {
                     // special case because we need to change into disconnected state here
                     self.on_connection_close(reason);
                 } else if let Connected(ref mut state) = self.internal_state {
@@ -56,8 +56,8 @@ impl RemoteServerInterface {
                     state.handle_message(msg);
                 }
             },
-            ServerMessage::Nonconnected(msg) => match msg {
-                NonconnectedServerMessage::ConnectionConfirm(my_player_id) => {
+            ServerMessage::Connectionless(msg) => match msg {
+                ConLessServerMessage::ConnectionConfirm(my_player_id) => {
                     self.on_connection_confirm(my_player_id)
                 },
             },
@@ -69,13 +69,13 @@ impl RemoteServerInterface {
             ConnectionRequestSent => {
                 self.internal_state = Connected(ConnectedState::new(my_player_id))
             },
-            Connected(_) | LeaveSent | ConnectionClosed(_) | NetworkError(_) => (),
+            Connected(_) | DisconnectRequestSent | ConnectionClosed(_) | NetworkError(_) => (),
         }
     }
 
     fn on_connection_close(&mut self, reason: ConnectionCloseReason) {
         match self.internal_state {
-            ConnectionRequestSent | LeaveSent | Connected(_) => {
+            ConnectionRequestSent | DisconnectRequestSent | Connected(_) => {
                 self.internal_state = ConnectionClosed(reason);
             },
             ConnectionClosed(_) | NetworkError(_) => (),
@@ -113,7 +113,8 @@ impl ServerInterface for RemoteServerInterface {
     fn connection_state(&self) -> ConnectionState {
         match self.internal_state {
             ConnectionRequestSent => ConnectionState::Connecting,
-            LeaveSent => ConnectionState::Disconnecting,
+            Connected(ref state) => state.connection_state(),
+            DisconnectRequestSent => ConnectionState::Disconnecting,
             ConnectionClosed(reason) => ConnectionState::Disconnected(match reason {
                 UserDisconnect => DisconnectedReason::UserDisconnect,
                 Kicked => DisconnectedReason::Kicked {
@@ -122,22 +123,21 @@ impl ServerInterface for RemoteServerInterface {
                 TimedOut => DisconnectedReason::TimedOut,
             }),
             NetworkError(_) => ConnectionState::Disconnected(DisconnectedReason::NetworkError),
-            Connected(ref state) => state.connection_state(),
         }
     }
 
     fn disconnect(&mut self) {
         match self.internal_state {
             ConnectionRequestSent => {
-                self.socket.send_connected(ConnectedClientMessage::DisconnectRequest);
+                self.socket.send_connected(ConClientMessage::DisconnectRequest);
                 // TODO wait for response?
                 self.internal_state = ConnectionClosed(UserDisconnect);
             },
             Connected(_) => {
-                self.socket.send_connected(ConnectedClientMessage::DisconnectRequest);
-                self.internal_state = LeaveSent;
+                self.socket.send_connected(ConClientMessage::DisconnectRequest);
+                self.internal_state = DisconnectRequestSent;
             },
-            LeaveSent | ConnectionClosed(_) | NetworkError(_) => (),
+            DisconnectRequestSent | ConnectionClosed(_) | NetworkError(_) => (),
         }
     }
 }
