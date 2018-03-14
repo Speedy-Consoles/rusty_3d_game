@@ -54,15 +54,6 @@ impl<T> OnlineDistribution<T> where T:
         } else {
             -util::duration_as_float(self.mean - sample)
         };
-        /*if old_diff > Self::tick_tolerance_delay_float(self.variance) {
-            println!(
-                "WARNING: Snapshot {} arrived too late! | \
-                    Deviation from mean: {:.2}ms | Tick tolerance delay: {:.2}ms",
-                tick,
-                old_diff * 1000.0,
-                Self::tick_tolerance_delay_float(self.variance) * 1000.0
-            );
-        }*/
         self.mean = self.mean.mix(
             &sample,
             NEWEST_START_TICK_TIME_WEIGHT
@@ -130,6 +121,20 @@ impl AfterSnapshotState {
 
     pub fn on_snapshot(&mut self, snapshot: Snapshot, recv_time: Instant) {
         let start_tick_time = recv_time - snapshot.tick() / TICK_SPEED;
+        if false {
+            let sigma_dev = self.start_tick_time_distribution.sigma_dev(SNAPSHOT_ARRIVAL_SIGMA_FACTOR);
+            let limit = self.start_tick_time_distribution.mean() + sigma_dev;
+            if start_tick_time > limit {
+                let diff = start_tick_time - self.start_tick_time_distribution.mean();
+                println!(
+                    "WARNING: Snapshot {} arrived too late! | \
+                        Deviation from mean: {:.2}ms | Tick tolerance delay: {:.2}ms",
+                    snapshot.tick(),
+                    util::duration_as_float(diff) * 1000.0,
+                    util::duration_as_float(sigma_dev) * 1000.0,
+                );
+            }
+        }
         self.start_tick_time_distribution.add_sample(start_tick_time);
         if snapshot.tick() > self.oldest_snapshot_tick {
             self.snapshots.insert(snapshot.tick(), snapshot);
@@ -167,10 +172,11 @@ impl AfterSnapshotState {
 
         let min_factor = 0.5;
         let max_factor = 2.0;
-        let factor_factor = 0.05;
+        let factor_factor = 0.5;
         let jump_threshold = 30.0;
         let mut speed_factor;
         if float_tick_diff < jump_threshold {
+            // TODO replace this simple linear function with something more thoughtful
             speed_factor = 1.0 + float_tick_diff * factor_factor
         } else {
             println!("WARNING: Jumping from {} to {}!",
