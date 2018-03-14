@@ -232,7 +232,7 @@ impl AfterSnapshotState {
         if tick_diff > 0 {
             println!(
                 "WARNING: {} ticks ahead of snapshots! | \
-                        Current tick: {} Tick of oldest snapshot: {}",
+                        Current tick: {} | Tick of oldest snapshot: {}",
                 tick_diff,
                 self.tick_info.tick,
                 self.oldest_snapshot_tick

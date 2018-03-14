@@ -159,10 +159,13 @@ impl Client {
             // sleep / handle traffic
             self.server_interface.handle_traffic(next_tick_time.min(next_draw_time));
 
+            // handle closing request
             if self.closing {
-                self.server_interface.disconnect();
-                if let Disconnected(_) = self.server_interface.connection_state() {
-                    break;
+                // wait for disconnect before closing
+                match self.server_interface.connection_state() {
+                    Connecting | Connected { .. } => self.server_interface.disconnect(),
+                    Disconnecting => (),
+                    Disconnected(_) => break,
                 }
             }
         }

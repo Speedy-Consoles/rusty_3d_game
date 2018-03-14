@@ -74,8 +74,9 @@ impl RemoteServerInterface {
 
     fn on_connection_confirm(&mut self, my_player_id: u64) {
         match self.internal_state {
-            ConnectionRequestSent
-                => self.internal_state = Connected(BeforeSnapshot { my_player_id }),
+            ConnectionRequestSent => {
+                self.internal_state = Connected(BeforeSnapshot { my_player_id })
+            },
             Connected { .. } | LeaveSent | ConnectionClosed(_) | NetworkError(_) => (),
         }
     }
@@ -115,6 +116,7 @@ impl ServerInterface for RemoteServerInterface {
                     break;
                 }
             }
+            // TODO maybe add conditional break here, to make sure the client stays responsive on DDoS
         }
     }
 
@@ -138,6 +140,7 @@ impl ServerInterface for RemoteServerInterface {
         match self.internal_state {
             ConnectionRequestSent => {
                 self.network.send(ClientMessage::DisconnectRequest);
+                // TODO wait for response?
                 self.internal_state = ConnectionClosed(UserDisconnect);
             },
             Connected { .. } => {
