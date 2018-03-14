@@ -18,7 +18,7 @@ use shared::net::ClientMessage;
 use shared::net::ServerMessage;
 use shared::net::Packable;
 use shared::net::Snapshot;
-use shared::net::DisconnectReason;
+use shared::net::ConnectionCloseReason;
 use shared::net::MAX_MESSAGE_LENGTH;
 
 struct Client {
@@ -33,7 +33,7 @@ pub struct Server {
     tick: u64,
     clients: HashMap<u64, Client>,
     clients_id_by_addr: HashMap<SocketAddr, u64>,
-    to_remove_clients: HashMap<u64, DisconnectReason>,
+    to_remove_clients: HashMap<u64, ConnectionCloseReason>,
 }
 
 impl Server {
@@ -95,7 +95,7 @@ impl Server {
         let now = Instant::now();
         for (id, client) in self.clients.iter() {
             if now - client.last_msg_time > consts::time_out_delay() {
-                self.to_remove_clients.insert(*id, DisconnectReason::TimedOut);
+                self.to_remove_clients.insert(*id, ConnectionCloseReason::TimedOut);
             }
         }
     }
@@ -162,7 +162,7 @@ impl Server {
             },
             ClientMessage::DisconnectRequest => {
                 if let Some(id) = id_option {
-                    self.to_remove_clients.insert(id, DisconnectReason::UserDisconnect);
+                    self.to_remove_clients.insert(id, ConnectionCloseReason::UserDisconnect);
                 }
             },
         }

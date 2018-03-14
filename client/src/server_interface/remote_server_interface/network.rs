@@ -2,7 +2,7 @@ use std::io;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::net::UdpSocket;
-use std::time::Duration;
+use std::time::Instant;
 
 use shared::net::ServerMessage;
 use shared::net::ClientMessage;
@@ -38,25 +38,46 @@ impl Network {
         self.socket.send(&buf[..amount]).unwrap();
     }
 
-    pub fn recv(&self, read_time_out: Option<Duration>) -> Option<ServerMessage> {
-        self.socket.set_read_timeout(read_time_out).unwrap();
+    pub fn recv_until(&self, until: Instant) -> io::Result<Option<ServerMessage>> {
+        // first make sure we read a message if there are any
+        self.socket.set_nonblocking(true).unwrap();
+        let result = self.recv();
+        self.socket.set_nonblocking(false).unwrap();
+        let mut option = result?;
+
+        // if there was no message, wait for one until time out
+        if option.is_none() {
+            let now = Instant::now();
+            if until <= now {
+                return Ok(None);
+            }
+            self.socket.set_read_timeout(Some(until - now)).unwrap();
+            option = self.recv()?;
+        }
+        Ok(option)
+    }
+
+    // reads messages until there is a valid one or an error occurs
+    // time out errors are transformed into None
+    fn recv(&self) -> io::Result<Option<ServerMessage>> {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
-        match self.socket.recv(&mut buf) {
-            Ok(amount) => {
-                match ServerMessage::unpack(&buf[..amount]) {
-                    Ok(msg) => Some(msg),
-                    Err(e) => {
-                        println!("{:?}", e);
-                        None
-                    },
+        loop {
+            match self.socket.recv(&mut buf) {
+                Ok(amount) => {
+                    match ServerMessage::unpack(&buf[..amount]) {
+                        Ok(msg) => return Ok(Some(msg)),
+                        Err(e) => println!(
+                            "DEBUG: Received malformed message. Unpack error: {:?}",
+                            e,
+                        ),
+                    }
+                },
+                Err(e) => {
+                    match e.kind() {
+                        ErrorKind::WouldBlock | ErrorKind::TimedOut => return Ok(None),
+                        _ => return Err(e),
+                    };
                 }
-            },
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::WouldBlock | ErrorKind::TimedOut => (),
-                    _ => println!("{:?}", e),
-                };
-                None
             }
         }
     }

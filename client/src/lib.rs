@@ -161,7 +161,7 @@ impl Client {
 
             if self.closing {
                 self.server_interface.disconnect();
-                if let Disconnected = self.server_interface.connection_state() {
+                if let Disconnected(_) = self.server_interface.connection_state() {
                     break;
                 }
             }

@@ -80,12 +80,12 @@ impl PartialOrd for Snapshot {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     ConnectionConfirm(u64),
-    ConnectionClose(DisconnectReason),
+    ConnectionClose(ConnectionCloseReason),
     Snapshot(Snapshot),
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)] // TODO find a way to not make this Copy
-pub enum DisconnectReason {
+pub enum ConnectionCloseReason {
     UserDisconnect,
     TimedOut,
     Kicked,

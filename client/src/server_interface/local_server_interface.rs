@@ -6,6 +6,7 @@ use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 
 use super::ConnectionState;
+use super::DisconnectedReason;
 use super::ServerInterface;
 use super::TickInfo;
 use self::InternalState::*;
@@ -90,7 +91,7 @@ impl ServerInterface for LocalServerInterface {
                 model,
                 predicted_world: model.world(),
             },
-            AfterDisconnect => ConnectionState::Disconnected,
+            AfterDisconnect => ConnectionState::Disconnected(DisconnectedReason::UserDisconnect),
         }
     }
 

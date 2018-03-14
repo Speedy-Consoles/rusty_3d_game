@@ -13,6 +13,16 @@ pub use self::local_server_interface::*;
 pub use self::remote_server_interface::*;
 
 #[derive(Clone, Copy)]
+pub enum DisconnectedReason<'a> {
+    NetworkError,
+    UserDisconnect,
+    Kicked {
+        kick_message: &'a str,
+    },
+    TimedOut,
+}
+
+#[derive(Clone, Copy)]
 pub enum ConnectionState<'a> {
     Connecting,
     Connected {
@@ -22,7 +32,7 @@ pub enum ConnectionState<'a> {
         predicted_world: &'a World,
     },
     Disconnecting,
-    Disconnected,
+    Disconnected(DisconnectedReason<'a>),
 }
 
 #[derive(Debug, Clone, Copy)]
