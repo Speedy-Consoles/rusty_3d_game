@@ -1,14 +1,13 @@
+mod socket;
+
 extern crate net2;
 
 extern crate shared;
 
+use std::thread;
 use std::time::Instant;
-use std::net::UdpSocket;
-use std::net::SocketAddr;
 use std::collections::HashMap;
-use std::io::ErrorKind;
-
-use net2::UdpBuilder;
+use std::io;
 
 use shared::consts;
 use shared::consts::TICK_SPEED;
@@ -16,38 +15,36 @@ use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::net::ClientMessage;
 use shared::net::ServerMessage;
-use shared::net::Packable;
 use shared::net::Snapshot;
 use shared::net::ConnectionCloseReason;
-use shared::net::MAX_MESSAGE_LENGTH;
+
+use socket::Socket;
+use socket::IdOrAddr;
 
 struct Client {
-    addr: SocketAddr,
     inputs: HashMap<u64, CharacterInput>,
     last_msg_time: Instant,
 }
 
 pub struct Server {
-    socket: UdpSocket,
+    socket: Socket,
     model: Model,
     tick: u64,
     clients: HashMap<u64, Client>,
-    clients_id_by_addr: HashMap<SocketAddr, u64>,
     to_remove_clients: HashMap<u64, ConnectionCloseReason>,
+    closing: bool,
 }
 
 impl Server {
-    pub fn new() -> Server {
-        Server {
-            socket: UdpBuilder::new_v6().unwrap()
-                .only_v6(false).unwrap()
-                .bind(("::", 51946)).unwrap(),
+    pub fn new() -> io::Result<Server> {
+        Ok(Server {
+            socket: Socket::new(51946)?,
             model: Model::new(),
             tick: 0,
             clients: HashMap::new(),
-            clients_id_by_addr: HashMap::new(),
             to_remove_clients: HashMap::new(),
-        }
+            closing: false,
+        })
     }
 
     pub fn run(&mut self) {
@@ -60,7 +57,7 @@ impl Server {
         let mut next_tick_time;
 
         // main loop
-        loop { // TODO add way to exit
+        while !self.closing { // TODO add way to exit
             // update clients
             self.check_timeouts();
             self.remove_clients();
@@ -72,8 +69,8 @@ impl Server {
                 }
             }
             self.model.do_tick();
-            let snapshot = ServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
-            self.broadcast(snapshot);
+            let msg = ServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
+            self.socket.broadcast(&msg);
             next_tick_time = start_tick_time + (self.tick + 1) / TICK_SPEED;
             tick_counter += 1;
 
@@ -104,49 +101,51 @@ impl Server {
         // TODO find a way to move the reason instead of copying it
         for (&id, &reason) in self.to_remove_clients.iter() {
             let _name = self.model.remove_player(id).unwrap().take_name(); // TODO for leave message
-            let client = self.clients.remove(&id).unwrap();
-            self.clients_id_by_addr.remove(&client.addr).unwrap();
             let msg = ServerMessage::ConnectionClose(reason);
-            self.send_to(msg, client.addr);
+            self.socket.send_to(&msg, IdOrAddr::Id(id));
+            self.socket.remove_client(id);
         }
         self.to_remove_clients.clear();
     }
 
     fn handle_traffic(&mut self, until: Instant) {
         loop {
-            let now = Instant::now();
-            if until <= now {
-                break;
+            match self.socket.recv_from_until(until) {
+                Ok(Some((msg, src))) => self.handle_message(msg, src),
+                Ok(None) => break,
+                Err(e) => {
+                    println!("ERROR: Network broken: {:?}", e);
+                    self.closing = true;
+                    let now = Instant::now();
+                    if now < until {
+                        thread::sleep(until - now);
+                    }
+                    break;
+                }
             }
-            self.socket.set_read_timeout(Some(until - now)).unwrap();
-            if let Some((msg, src)) = self.recv_from() {
-                self.handle_message(msg, src);
-            }
+            // TODO maybe add conditional break here, to make sure the server continues ticking on DDoS
         }
     }
 
-    fn handle_message(&mut self, message: ClientMessage, src: SocketAddr) {
+    fn handle_message(&mut self, message: ClientMessage, src: IdOrAddr) {
         let recv_time = Instant::now();
-        let id_option = self.clients_id_by_addr.get(&src).map(|id| *id);
-        if let Some(id) = id_option {
+        if let IdOrAddr::Id(id) = src {
             self.clients.get_mut(&id).unwrap().last_msg_time = recv_time;
         }
         match message {
             ClientMessage::ConnectionRequest => {
-                if id_option.is_some() {
-                    return;
+                if let IdOrAddr::Addr(addr) = src {
+                    let new_id = self.model.add_player(String::from("UnknownPlayer"));
+                    self.clients.insert(new_id, Client {
+                        inputs: HashMap::new(),
+                        last_msg_time: recv_time,
+                    });
+                    self.socket.add_client(new_id, addr);
+                    self.socket.send_to(&ServerMessage::ConnectionConfirm(new_id), src);
                 }
-                let new_id = self.model.add_player(String::from("UnknownPlayer"));
-                self.clients.insert(new_id, Client {
-                    addr: src,
-                    inputs: HashMap::new(),
-                    last_msg_time: recv_time,
-                });
-                self.clients_id_by_addr.insert(src, new_id);
-                self.send_to(ServerMessage::ConnectionConfirm(new_id), src);
             },
             ClientMessage::Input { tick, input } => {
-                if let Some(id) = id_option {
+                if let IdOrAddr::Id(id) = src {
                     let client = self.clients.get_mut(&id).unwrap();
                     if tick > self.tick {
                         client.inputs.insert(tick, input);
@@ -161,46 +160,10 @@ impl Server {
                 }
             },
             ClientMessage::DisconnectRequest => {
-                if let Some(id) = id_option {
+                if let IdOrAddr::Id(id) = src {
                     self.to_remove_clients.insert(id, ConnectionCloseReason::UserDisconnect);
                 }
             },
-        }
-    }
-
-    fn send_to(&self, msg: ServerMessage, dst: SocketAddr) {
-        let mut buf = [0; MAX_MESSAGE_LENGTH];
-        let amount = msg.pack(&mut buf).unwrap();
-        self.socket.send_to(&buf[..amount], dst).unwrap();
-    }
-
-    fn broadcast(&self, msg: ServerMessage) {
-        let mut buf = [0; MAX_MESSAGE_LENGTH];
-        let amount = msg.pack(&mut buf).unwrap();
-        for client in self.clients.values() {
-            self.socket.send_to(&buf[..amount], client.addr).unwrap();
-        }
-    }
-
-    fn recv_from(&self) -> Option<(ClientMessage, SocketAddr)> {
-        let mut buf = [0; MAX_MESSAGE_LENGTH];
-        match self.socket.recv_from(&mut buf) {
-            Ok((amount, src)) => {
-                match ClientMessage::unpack(&buf[..amount]) {
-                    Ok(msg) => Some((msg, src)),
-                    Err(e) => {
-                        println!("{:?}", e);
-                        None
-                    },
-                }
-            },
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::WouldBlock | ErrorKind::TimedOut => (),
-                    _ => println!("{:?}", e),
-                };
-                None
-            }
         }
     }
 }

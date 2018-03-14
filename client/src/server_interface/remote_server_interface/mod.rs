@@ -1,5 +1,5 @@
 mod after_snapshot_state;
-mod network;
+mod socket;
 
 use std::time::Instant;
 use std::io;
@@ -18,7 +18,7 @@ use super::ConnectionState;
 use super::ServerInterface;
 use self::InternalState::*;
 use self::ConnectedState::*;
-use self::network::Network;
+use self::socket::Socket;
 use self::after_snapshot_state::AfterSnapshotState;
 
 enum ConnectedState {
@@ -38,13 +38,13 @@ enum InternalState {
 
 pub struct RemoteServerInterface {
     internal_state: InternalState,
-    network: Network
+    socket: Socket
 }
 
 impl RemoteServerInterface {
     pub fn new(addr: SocketAddr) -> io::Result<RemoteServerInterface> {
         Ok(RemoteServerInterface {
-            network: Network::new(addr)?,
+            socket: Socket::new(addr)?,
             internal_state: ConnectionRequestSent,
         })
     }
@@ -95,7 +95,7 @@ impl ServerInterface for RemoteServerInterface {
     fn do_tick(&mut self, character_input: CharacterInput) {
         match self.internal_state {
             Connected(AfterSnapshot(ref mut after_snapshot_state)) => {
-                after_snapshot_state.do_tick(&self.network, character_input)
+                after_snapshot_state.do_tick(&self.socket, character_input)
             },
             _ => (), // TODO
         }
@@ -103,7 +103,7 @@ impl ServerInterface for RemoteServerInterface {
 
     fn handle_traffic(&mut self, until: Instant) {
         loop {
-            match self.network.recv_until(until) {
+            match self.socket.recv_until(until) {
                 Ok(Some(msg)) => self.handle_message(msg),
                 Ok(None) => break,
                 Err(e) => {
@@ -139,12 +139,12 @@ impl ServerInterface for RemoteServerInterface {
     fn disconnect(&mut self) {
         match self.internal_state {
             ConnectionRequestSent => {
-                self.network.send(ClientMessage::DisconnectRequest);
+                self.socket.send(&ClientMessage::DisconnectRequest);
                 // TODO wait for response?
                 self.internal_state = ConnectionClosed(UserDisconnect);
             },
             Connected { .. } => {
-                self.network.send(ClientMessage::DisconnectRequest);
+                self.socket.send(&ClientMessage::DisconnectRequest);
                 self.internal_state = LeaveSent;
             },
             LeaveSent | ConnectionClosed(_) | NetworkError(_) => (),

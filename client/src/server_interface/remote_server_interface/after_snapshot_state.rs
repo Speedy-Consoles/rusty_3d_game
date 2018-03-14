@@ -19,7 +19,7 @@ use shared::consts::SNAPSHOT_ARRIVAL_SIGMA_FACTOR;
 use shared::util;
 use shared::util::Mix;
 
-use super::network::Network;
+use super::socket::Socket;
 use server_interface::ConnectionState;
 use server_interface::TickInfo;
 
@@ -143,7 +143,7 @@ impl AfterSnapshotState {
         }
     }
 
-    pub fn do_tick(&mut self, network: &Network, character_input: CharacterInput) {
+    pub fn do_tick(&mut self, network: &Socket, character_input: CharacterInput) {
         self.update_tick_info();
         self.update_predict_tick();
         self.remove_old_snapshots_and_inputs();
@@ -219,9 +219,9 @@ impl AfterSnapshotState {
         self.oldest_snapshot_tick = new_oldest_snapshot_tick;
     }
 
-    fn send_and_save_input(&mut self, network: &Network, character_input: CharacterInput) {
+    fn send_and_save_input(&mut self, network: &Socket, character_input: CharacterInput) {
         let msg = ClientMessage::Input { tick: self.predicted_tick, input: character_input };
-        network.send(msg);
+        network.send(&msg);
         self.sent_inputs.insert(self.predicted_tick, character_input);
     }
 

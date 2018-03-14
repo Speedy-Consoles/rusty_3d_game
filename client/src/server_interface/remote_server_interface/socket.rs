@@ -9,40 +9,37 @@ use shared::net::ClientMessage;
 use shared::net::MAX_MESSAGE_LENGTH;
 use shared::net::Packable;
 
-pub struct Network {
-    socket: UdpSocket,
+pub struct Socket {
+    udp_socket: UdpSocket,
 }
 
-impl Network {
-    pub fn new(addr: SocketAddr) -> io::Result<Network> {
+impl Socket {
+    pub fn new(addr: SocketAddr) -> io::Result<Socket> {
         // let the os decide over port
         let local_addr = match addr {
             SocketAddr::V4(_) => "0.0.0.0:0",
             SocketAddr::V6(_) => "[::]:0",
         };
-        UdpSocket::bind(local_addr).and_then(|socket| {
-            if let Err(e) = socket.connect(addr) {
-                return Err(e);
-            }
-            let network = Network {
-                socket,
-            };
-            network.send(ClientMessage::ConnectionRequest);
-            Ok(network)
-        })
+        let socket = UdpSocket::bind(local_addr)?;
+        socket.connect(addr)?;
+        let network = Socket {
+            udp_socket: socket,
+        };
+        network.send(&ClientMessage::ConnectionRequest);
+        Ok(network)
     }
 
-    pub fn send(&self, msg: ClientMessage) {
+    pub fn send(&self, msg: &ClientMessage) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let amount = msg.pack(&mut buf).unwrap();
-        self.socket.send(&buf[..amount]).unwrap();
+        self.udp_socket.send(&buf[..amount]).unwrap();
     }
 
     pub fn recv_until(&self, until: Instant) -> io::Result<Option<ServerMessage>> {
         // first make sure we read a message if there are any
-        self.socket.set_nonblocking(true).unwrap();
+        self.udp_socket.set_nonblocking(true).unwrap();
         let result = self.recv();
-        self.socket.set_nonblocking(false).unwrap();
+        self.udp_socket.set_nonblocking(false).unwrap();
         let mut option = result?;
 
         // if there was no message, wait for one until time out
@@ -51,7 +48,7 @@ impl Network {
             if until <= now {
                 return Ok(None);
             }
-            self.socket.set_read_timeout(Some(until - now)).unwrap();
+            self.udp_socket.set_read_timeout(Some(until - now)).unwrap();
             option = self.recv()?;
         }
         Ok(option)
@@ -62,7 +59,7 @@ impl Network {
     fn recv(&self) -> io::Result<Option<ServerMessage>> {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         loop {
-            match self.socket.recv(&mut buf) {
+            match self.udp_socket.recv(&mut buf) {
                 Ok(amount) => {
                     match ServerMessage::unpack(&buf[..amount]) {
                         Ok(msg) => return Ok(Some(msg)),
