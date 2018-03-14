@@ -6,6 +6,8 @@ use std::time::Instant;
 
 use shared::net::ServerMessage;
 use shared::net::ClientMessage;
+use shared::net::ConnectedClientMessage;
+use shared::net::NonconnectedClientMessage;
 use shared::net::MAX_MESSAGE_LENGTH;
 use shared::net::Packable;
 
@@ -20,18 +22,25 @@ impl Socket {
             SocketAddr::V4(_) => "0.0.0.0:0",
             SocketAddr::V6(_) => "[::]:0",
         };
-        let socket = UdpSocket::bind(local_addr)?;
-        socket.connect(addr)?;
-        let network = Socket {
-            udp_socket: socket,
+        let udp_socket = UdpSocket::bind(local_addr)?;
+        udp_socket.connect(addr)?;
+        let socket = Socket {
+            udp_socket,
         };
-        network.send(&ClientMessage::ConnectionRequest);
-        Ok(network)
+        Ok(socket)
     }
 
-    pub fn send(&self, msg: &ClientMessage) {
+    pub fn send_connected(&self, message: ConnectedClientMessage) {
+        self.send(ClientMessage::Connected(message));
+    }
+
+    pub fn send_nonconnected(&self, message: NonconnectedClientMessage) {
+        self.send(ClientMessage::Nonconnected(message));
+    }
+
+    fn send(&self, message: ClientMessage) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
-        let amount = msg.pack(&mut buf).unwrap();
+        let amount = message.pack(&mut buf).unwrap();
         self.udp_socket.send(&buf[..amount]).unwrap();
     }
 

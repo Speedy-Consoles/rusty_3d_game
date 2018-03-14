@@ -8,8 +8,10 @@ use std::thread;
 
 use shared::model::world::character::CharacterInput;
 use shared::net::ServerMessage;
-use shared::net::ClientMessage;
-use shared::net::Snapshot;
+use shared::net::ConnectedServerMessage;
+use shared::net::NonconnectedServerMessage;
+use shared::net::ConnectedClientMessage;
+use shared::net::NonconnectedClientMessage;
 use shared::net::ConnectionCloseReason;
 use shared::net::ConnectionCloseReason::*;
 
@@ -28,6 +30,27 @@ enum ConnectedState {
     AfterSnapshot(AfterSnapshotState),
 }
 
+impl ConnectedState {
+    fn handle_message(&mut self, msg: ConnectedServerMessage) {
+        let recv_time = Instant::now();
+        match msg {
+            ConnectedServerMessage::Snapshot(snapshot) => match self {
+                &mut BeforeSnapshot { my_player_id } => {
+                    *self = AfterSnapshot(AfterSnapshotState::new(
+                        my_player_id,
+                        snapshot,
+                        recv_time,
+                    ));
+                },
+                &mut AfterSnapshot(ref mut after_snapshot_state) => {
+                    after_snapshot_state.on_snapshot(snapshot, recv_time);
+                }
+            },
+            ConnectedServerMessage::ConnectionClose(_) => (), // will not happen
+        }
+    }
+}
+
 enum InternalState {
     ConnectionRequestSent,
     Connected(ConnectedState),
@@ -43,32 +66,30 @@ pub struct RemoteServerInterface {
 
 impl RemoteServerInterface {
     pub fn new(addr: SocketAddr) -> io::Result<RemoteServerInterface> {
+        let socket = Socket::new(addr)?;
+        socket.send_nonconnected(NonconnectedClientMessage::ConnectionRequest);
         Ok(RemoteServerInterface {
-            socket: Socket::new(addr)?,
+            socket,
             internal_state: ConnectionRequestSent,
         })
     }
 
-    fn handle_message(&mut self, msg: ServerMessage) {
-        use shared::net::ServerMessage::*;
-        match msg {
-            ConnectionConfirm(my_player_id) => self.on_connection_confirm(my_player_id),
-            ConnectionClose(reason) => self.on_connection_close(reason),
-            Snapshot(s) => self.on_snapshot(s),
-        }
-    }
-
-    fn on_snapshot(&mut self, snapshot: Snapshot) {
-        let recv_time = Instant::now();
-        if let Connected(ref mut connected_state) = self.internal_state {
-            match connected_state {
-                &mut BeforeSnapshot { my_player_id } => *connected_state = AfterSnapshot(
-                    AfterSnapshotState::new(my_player_id, snapshot, recv_time)
-                ),
-                &mut AfterSnapshot(ref mut after_snapshot_state) => {
-                    after_snapshot_state.on_snapshot(snapshot, recv_time)
+    fn handle_message(&mut self, message: ServerMessage) {
+        match message {
+            ServerMessage::Connected(msg) => {
+                if let ConnectedServerMessage::ConnectionClose(reason) = msg {
+                    // special case because we need to change into disconnected state here
+                    self.on_connection_close(reason);
+                } else if let Connected(ref mut state) = self.internal_state {
+                    // the normal case
+                    state.handle_message(msg);
                 }
-            }
+            },
+            ServerMessage::Nonconnected(msg) => match msg {
+                NonconnectedServerMessage::ConnectionConfirm(my_player_id) => {
+                    self.on_connection_confirm(my_player_id)
+                },
+            },
         }
     }
 
@@ -77,13 +98,13 @@ impl RemoteServerInterface {
             ConnectionRequestSent => {
                 self.internal_state = Connected(BeforeSnapshot { my_player_id })
             },
-            Connected { .. } | LeaveSent | ConnectionClosed(_) | NetworkError(_) => (),
+            Connected(_) | LeaveSent | ConnectionClosed(_) | NetworkError(_) => (),
         }
     }
 
     fn on_connection_close(&mut self, reason: ConnectionCloseReason) {
         match self.internal_state {
-            ConnectionRequestSent | LeaveSent | Connected { .. } => {
+            ConnectionRequestSent | LeaveSent | Connected(_) => {
                 self.internal_state = ConnectionClosed(reason);
             },
             ConnectionClosed(_) | NetworkError(_) => (),
@@ -139,12 +160,12 @@ impl ServerInterface for RemoteServerInterface {
     fn disconnect(&mut self) {
         match self.internal_state {
             ConnectionRequestSent => {
-                self.socket.send(&ClientMessage::DisconnectRequest);
+                self.socket.send_connected(ConnectedClientMessage::DisconnectRequest);
                 // TODO wait for response?
                 self.internal_state = ConnectionClosed(UserDisconnect);
             },
-            Connected { .. } => {
-                self.socket.send(&ClientMessage::DisconnectRequest);
+            Connected(_) => {
+                self.socket.send_connected(ConnectedClientMessage::DisconnectRequest);
                 self.internal_state = LeaveSent;
             },
             LeaveSent | ConnectionClosed(_) | NetworkError(_) => (),

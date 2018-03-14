@@ -8,24 +8,19 @@ use std::collections::HashMap;
 use net2::UdpBuilder;
 
 use shared::net::ClientMessage;
+use shared::net::ConnectedClientMessage;
+use shared::net::NonconnectedClientMessage;
 use shared::net::ServerMessage;
+use shared::net::ConnectedServerMessage;
+use shared::net::NonconnectedServerMessage;
 use shared::net::Packable;
 use shared::net::MAX_MESSAGE_LENGTH;
 
-use self::IdOrAddr::*;
+use self::CheckedClientMessage::*;
 
-pub enum IdOrAddr {
-    Addr(SocketAddr),
-    Id(u64),
-}
-
-impl IdOrAddr {
-    pub fn identified(&self) -> bool {
-        match self {
-            &Addr(_) => false,
-            &Id(_) => true,
-        }
-    }
+pub enum CheckedClientMessage {
+    Unknown(NonconnectedClientMessage, SocketAddr),
+    Known(ConnectedClientMessage, u64),
 }
 
 pub struct Socket {
@@ -45,7 +40,9 @@ impl Socket {
     }
 
     pub fn add_client(&mut self, id: u64, addr: SocketAddr) {
-        self.client_ids_by_addr.insert(addr, id);
+        if self.client_ids_by_addr.insert(addr, id).is_some() {
+            panic!("Tried to add client with addr already matched to client!");
+        }
         self.client_addrs_by_id.insert(id, addr);
     }
 
@@ -54,23 +51,33 @@ impl Socket {
         self.client_ids_by_addr.remove(&addr).unwrap();
     }
 
-    pub fn send_to(&self, msg: &ServerMessage, id_or_addr: IdOrAddr) {
+    pub fn client_id_by_addr(&self, addr: SocketAddr) -> Option<u64> {
+        self.client_ids_by_addr.get(&addr).map(|id| *id)
+    }
+
+    pub fn send_to_connected(&self, message: ConnectedServerMessage, id: u64) {
+        let addr = self.client_addrs_by_id.get(&id).unwrap();
+        self.send_to(&ServerMessage::Connected(message), *addr);
+    }
+
+    pub fn send_to_nonconnected(&self, message: NonconnectedServerMessage, addr: SocketAddr) {
+        self.send_to(&ServerMessage::Nonconnected(message), addr);
+    }
+
+    fn send_to(&self, message: &ServerMessage, addr: SocketAddr) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
-        let amount = msg.pack(&mut buf).unwrap();
-        let addr = match id_or_addr {
-            IdOrAddr::Addr(addr) => addr,
-            IdOrAddr::Id(id) => *self.client_addrs_by_id.get(&id).unwrap(),
-        };
+        let amount = message.pack(&mut buf).unwrap();
         self.udp_socket.send_to(&buf[..amount], addr).unwrap();
     }
 
-    pub fn broadcast(&self, msg: &ServerMessage) {
+    pub fn broadcast(&self, message: ConnectedServerMessage) {
+        let msg = ServerMessage::Connected(message);
         for addr in self.client_ids_by_addr.keys() {
-            self.send_to(msg, IdOrAddr::Addr(*addr));
+            self.send_to(&msg, *addr);
         }
     }
 
-    pub fn recv_from_until(&self, until: Instant) -> io::Result<Option<(ClientMessage, IdOrAddr)>> {
+    pub fn recv_from_until(&self, until: Instant) -> io::Result<Option<CheckedClientMessage>> {
         // first make sure we read a message if there are any
         self.udp_socket.set_nonblocking(true).unwrap();
         let result = self.recv_from();
@@ -91,15 +98,24 @@ impl Socket {
 
     // reads messages until there is a valid one or an error occurs
     // time out errors are transformed into None
-    fn recv_from(&self) -> io::Result<Option<(ClientMessage, IdOrAddr)>> {
+    fn recv_from(&self) -> io::Result<Option<CheckedClientMessage>> {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         loop {
             match self.udp_socket.recv_from(&mut buf) {
                 Ok((amount, addr)) => {
-                    let id_or_addr = self.client_ids_by_addr.get(&addr)
-                        .map_or(Addr(addr), |id| Id(*id));
                     match ClientMessage::unpack(&buf[..amount]) {
-                        Ok(msg) => return Ok(Some((msg, id_or_addr))),
+                        Ok(ClientMessage::Connected(msg)) => {
+                            if let Some(id) = self.client_ids_by_addr.get(&addr) {
+                                return Ok(Some(Known(msg, *id)));
+                            } else {
+                                println!("WARNING: Received connectionful message \
+                                         without connection!");
+                                // TODO send connection reset
+                            }
+                        },
+                        Ok(ClientMessage::Nonconnected(msg)) => {
+                            return Ok(Some(Unknown(msg, addr)));
+                        },
                         Err(e) => println!(
                             "DEBUG: Received malformed message. Unpack error: {:?}",
                             e,

@@ -33,9 +33,19 @@ impl<'a, T: Serialize + Deserialize<'a>> Packable<'a> for T {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
-    ConnectionRequest,
+    Connected(ConnectedClientMessage),
+    Nonconnected(NonconnectedClientMessage),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ConnectedClientMessage {
     DisconnectRequest,
     Input { tick: u64, input: CharacterInput, },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum NonconnectedClientMessage {
+    ConnectionRequest,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -79,7 +89,17 @@ impl PartialOrd for Snapshot {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
+    Connected(ConnectedServerMessage),
+    Nonconnected(NonconnectedServerMessage),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum NonconnectedServerMessage {
     ConnectionConfirm(u64),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ConnectedServerMessage {
     ConnectionClose(ConnectionCloseReason),
     Snapshot(Snapshot),
 }

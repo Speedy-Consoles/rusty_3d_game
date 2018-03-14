@@ -10,7 +10,7 @@ use shared::tick_time::TickRate;
 use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
-use shared::net::ClientMessage;
+use shared::net::ConnectedClientMessage;
 use shared::net::Snapshot;
 use shared::consts::TICK_SPEED;
 use shared::consts::NEWEST_START_TICK_TIME_WEIGHT;
@@ -219,9 +219,12 @@ impl AfterSnapshotState {
         self.oldest_snapshot_tick = new_oldest_snapshot_tick;
     }
 
-    fn send_and_save_input(&mut self, network: &Socket, character_input: CharacterInput) {
-        let msg = ClientMessage::Input { tick: self.predicted_tick, input: character_input };
-        network.send(&msg);
+    fn send_and_save_input(&mut self, socket: &Socket, character_input: CharacterInput) {
+        let msg = ConnectedClientMessage::Input {
+            tick: self.predicted_tick,
+            input: character_input
+        };
+        socket.send_connected(msg);
         self.sent_inputs.insert(self.predicted_tick, character_input);
     }
 

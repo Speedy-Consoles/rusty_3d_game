@@ -13,13 +13,15 @@ use shared::consts;
 use shared::consts::TICK_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
-use shared::net::ClientMessage;
-use shared::net::ServerMessage;
+use shared::net::ConnectedClientMessage;
+use shared::net::NonconnectedClientMessage;
+use shared::net::ConnectedServerMessage;
+use shared::net::NonconnectedServerMessage;
 use shared::net::Snapshot;
 use shared::net::ConnectionCloseReason;
 
 use socket::Socket;
-use socket::IdOrAddr;
+use socket::CheckedClientMessage;
 
 struct Client {
     inputs: HashMap<u64, CharacterInput>,
@@ -69,8 +71,8 @@ impl Server {
                 }
             }
             self.model.do_tick();
-            let msg = ServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
-            self.socket.broadcast(&msg);
+            let msg = ConnectedServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
+            self.socket.broadcast(msg);
             next_tick_time = start_tick_time + (self.tick + 1) / TICK_SPEED;
             tick_counter += 1;
 
@@ -101,8 +103,9 @@ impl Server {
         // TODO find a way to move the reason instead of copying it
         for (&id, &reason) in self.to_remove_clients.iter() {
             let _name = self.model.remove_player(id).unwrap().take_name(); // TODO for leave message
-            let msg = ServerMessage::ConnectionClose(reason);
-            self.socket.send_to(&msg, IdOrAddr::Id(id));
+            self.clients.remove(&id);
+            let msg = ConnectedServerMessage::ConnectionClose(reason);
+            self.socket.send_to_connected(msg, id);
             self.socket.remove_client(id);
         }
         self.to_remove_clients.clear();
@@ -111,7 +114,7 @@ impl Server {
     fn handle_traffic(&mut self, until: Instant) {
         loop {
             match self.socket.recv_from_until(until) {
-                Ok(Some((msg, src))) => self.handle_message(msg, src),
+                Ok(Some(msg)) => self.handle_message(msg),
                 Ok(None) => break,
                 Err(e) => {
                     println!("ERROR: Network broken: {:?}", e);
@@ -127,43 +130,50 @@ impl Server {
         }
     }
 
-    fn handle_message(&mut self, message: ClientMessage, src: IdOrAddr) {
+    fn handle_message(&mut self, message: CheckedClientMessage) {
         let recv_time = Instant::now();
-        if let IdOrAddr::Id(id) = src {
-            self.clients.get_mut(&id).unwrap().last_msg_time = recv_time;
-        }
         match message {
-            ClientMessage::ConnectionRequest => {
-                if let IdOrAddr::Addr(addr) = src {
-                    let new_id = self.model.add_player(String::from("UnknownPlayer"));
-                    self.clients.insert(new_id, Client {
-                        inputs: HashMap::new(),
-                        last_msg_time: recv_time,
-                    });
-                    self.socket.add_client(new_id, addr);
-                    self.socket.send_to(&ServerMessage::ConnectionConfirm(new_id), src);
+            CheckedClientMessage::Unknown(msg, addr) => {
+                match msg {
+                    NonconnectedClientMessage::ConnectionRequest => {
+                        if let Some(_id) = self.socket.client_id_by_addr(addr) {
+                            // TODO send another connection confirm to client and reset their connection meta data
+                        } else {
+                            let new_id = self.model.add_player(String::from("UnknownPlayer"));
+                            self.clients.insert(new_id, Client {
+                                inputs: HashMap::new(),
+                                last_msg_time: recv_time,
+                            });
+                            self.socket.add_client(new_id, addr);
+                            self.socket.send_to_nonconnected(
+                                NonconnectedServerMessage::ConnectionConfirm(new_id),
+                                addr,
+                            );
+                        }
+                    },
                 }
             },
-            ClientMessage::Input { tick, input } => {
-                if let IdOrAddr::Id(id) = src {
-                    let client = self.clients.get_mut(&id).unwrap();
-                    if tick > self.tick {
-                        client.inputs.insert(tick, input);
-                        // TODO ignore insanely high ticks
-                    } else {
-                        println!(
-                            "Input came too late! | Current tick: {} | Target tick: {}",
-                            self.tick,
-                            tick,
-                        );
-                    }
+            CheckedClientMessage::Known(msg, id) => {
+                self.clients.get_mut(&id).unwrap().last_msg_time = recv_time;
+                match msg {
+                    ConnectedClientMessage::Input { tick, input } => {
+                        let client = self.clients.get_mut(&id).unwrap();
+                        if tick > self.tick {
+                            client.inputs.insert(tick, input);
+                            // TODO ignore insanely high ticks
+                        } else {
+                            println!(
+                                "Input came too late! | Current tick: {} | Target tick: {}",
+                                self.tick,
+                                tick,
+                            );
+                        }
+                    },
+                    ConnectedClientMessage::DisconnectRequest => {
+                        self.to_remove_clients.insert(id, ConnectionCloseReason::UserDisconnect);
+                    },
                 }
-            },
-            ClientMessage::DisconnectRequest => {
-                if let IdOrAddr::Id(id) = src {
-                    self.to_remove_clients.insert(id, ConnectionCloseReason::UserDisconnect);
-                }
-            },
+            }
         }
     }
 }
