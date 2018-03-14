@@ -104,7 +104,7 @@ pub enum ConServerMessage {
     Snapshot(Snapshot),
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)] // TODO find a way to not make this Copy
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ConnectionCloseReason {
     UserDisconnect,
     TimedOut,

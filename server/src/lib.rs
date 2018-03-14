@@ -101,14 +101,14 @@ impl Server {
 
     fn remove_clients(&mut self) {
         // TODO find a way to move the reason instead of copying it
-        for (&id, &reason) in self.to_remove_clients.iter() {
+        for (id, reason) in self.to_remove_clients.drain() {
             let _name = self.model.remove_player(id).unwrap().take_name(); // TODO for leave message
             self.clients.remove(&id);
             let msg = ConServerMessage::ConnectionClose(reason);
             self.socket.send_to_connected(msg, id);
             self.socket.remove_client(id);
+            // TODO send leave message
         }
-        self.to_remove_clients.clear();
     }
 
     fn handle_traffic(&mut self, until: Instant) {

@@ -115,12 +115,12 @@ impl ServerInterface for RemoteServerInterface {
             ConnectionRequestSent => ConnectionState::Connecting,
             Connected(ref state) => state.connection_state(),
             DisconnectRequestSent => ConnectionState::Disconnecting,
-            ConnectionClosed(reason) => ConnectionState::Disconnected(match reason {
-                UserDisconnect => DisconnectedReason::UserDisconnect,
-                Kicked => DisconnectedReason::Kicked {
+            ConnectionClosed(ref reason) => ConnectionState::Disconnected(match reason {
+                &UserDisconnect => DisconnectedReason::UserDisconnect,
+                &Kicked => DisconnectedReason::Kicked {
                     kick_message: "You were kicked for some reason.", // TODO replace with actual message
                 },
-                TimedOut => DisconnectedReason::TimedOut,
+                &TimedOut => DisconnectedReason::TimedOut,
             }),
             NetworkError(_) => ConnectionState::Disconnected(DisconnectedReason::NetworkError),
         }
