@@ -1,4 +1,4 @@
-mod after_snapshot_state;
+mod connected_state;
 mod socket;
 
 use std::time::Instant;
@@ -18,38 +18,9 @@ use shared::net::ConnectionCloseReason::*;
 use super::DisconnectedReason;
 use super::ConnectionState;
 use super::ServerInterface;
+use self::connected_state::ConnectedState;
 use self::InternalState::*;
-use self::ConnectedState::*;
 use self::socket::Socket;
-use self::after_snapshot_state::AfterSnapshotState;
-
-enum ConnectedState {
-    BeforeSnapshot {
-        my_player_id: u64,
-    },
-    AfterSnapshot(AfterSnapshotState),
-}
-
-impl ConnectedState {
-    fn handle_message(&mut self, msg: ConnectedServerMessage) {
-        let recv_time = Instant::now();
-        match msg {
-            ConnectedServerMessage::Snapshot(snapshot) => match self {
-                &mut BeforeSnapshot { my_player_id } => {
-                    *self = AfterSnapshot(AfterSnapshotState::new(
-                        my_player_id,
-                        snapshot,
-                        recv_time,
-                    ));
-                },
-                &mut AfterSnapshot(ref mut after_snapshot_state) => {
-                    after_snapshot_state.on_snapshot(snapshot, recv_time);
-                }
-            },
-            ConnectedServerMessage::ConnectionClose(_) => (), // will not happen
-        }
-    }
-}
 
 enum InternalState {
     ConnectionRequestSent,
@@ -96,7 +67,7 @@ impl RemoteServerInterface {
     fn on_connection_confirm(&mut self, my_player_id: u64) {
         match self.internal_state {
             ConnectionRequestSent => {
-                self.internal_state = Connected(BeforeSnapshot { my_player_id })
+                self.internal_state = Connected(ConnectedState::new(my_player_id))
             },
             Connected(_) | LeaveSent | ConnectionClosed(_) | NetworkError(_) => (),
         }
@@ -115,9 +86,7 @@ impl RemoteServerInterface {
 impl ServerInterface for RemoteServerInterface {
     fn do_tick(&mut self, character_input: CharacterInput) {
         match self.internal_state {
-            Connected(AfterSnapshot(ref mut after_snapshot_state)) => {
-                after_snapshot_state.do_tick(&self.socket, character_input)
-            },
+            Connected(ref mut state) => state.do_tick(&self.socket, character_input),
             _ => (), // TODO
         }
     }
@@ -143,7 +112,7 @@ impl ServerInterface for RemoteServerInterface {
 
     fn connection_state(&self) -> ConnectionState {
         match self.internal_state {
-            ConnectionRequestSent | Connected(BeforeSnapshot { .. }) => ConnectionState::Connecting,
+            ConnectionRequestSent => ConnectionState::Connecting,
             LeaveSent => ConnectionState::Disconnecting,
             ConnectionClosed(reason) => ConnectionState::Disconnected(match reason {
                 UserDisconnect => DisconnectedReason::UserDisconnect,
@@ -153,7 +122,7 @@ impl ServerInterface for RemoteServerInterface {
                 TimedOut => DisconnectedReason::TimedOut,
             }),
             NetworkError(_) => ConnectionState::Disconnected(DisconnectedReason::NetworkError),
-            Connected(AfterSnapshot(ref state)) => state.connection_state(),
+            Connected(ref state) => state.connection_state(),
         }
     }
 

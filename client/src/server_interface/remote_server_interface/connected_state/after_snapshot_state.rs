@@ -19,7 +19,7 @@ use shared::consts::SNAPSHOT_ARRIVAL_SIGMA_FACTOR;
 use shared::util;
 use shared::util::Mix;
 
-use super::socket::Socket;
+use server_interface::remote_server_interface::socket::Socket;
 use server_interface::ConnectionState;
 use server_interface::TickInfo;
 
