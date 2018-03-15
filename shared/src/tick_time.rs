@@ -3,6 +3,8 @@ use std::time::Duration;
 use std::ops::Mul;
 use std::ops::Div;
 
+use util;
+
 #[derive(Debug, Clone, Copy)]
 pub struct TickInstant {
     pub tick: u64,
@@ -10,11 +12,33 @@ pub struct TickInstant {
 }
 
 impl TickInstant {
-    pub fn new(start_tick_time: Instant, now: Instant, rate: TickRate) -> TickInstant {
+    pub fn from_start_tick(start_tick_time: Instant, now: Instant, rate: TickRate) -> TickInstant {
         let tick_diff = (now - start_tick_time) * rate;
         TickInstant {
             tick: tick_diff.ticks,
             intra_tick: tick_diff.tick_fraction,
+        }
+    }
+
+    pub fn from_interval(tick: u64, tick_time: Instant, next_tick_time: Instant,
+                         now: Instant) -> TickInstant {
+        if now > next_tick_time {
+            TickInstant {
+                tick,
+                intra_tick: 1.0,
+            }
+        } else if now < tick_time {
+            TickInstant {
+                tick,
+                intra_tick: 0.0,
+            }
+        } else {
+            let part_dur = now - tick_time;
+            let whole_dur = next_tick_time - tick_time;
+            TickInstant {
+                tick,
+                intra_tick: util::duration_as_float(part_dur) / util::duration_as_float(whole_dur),
+            }
         }
     }
 }

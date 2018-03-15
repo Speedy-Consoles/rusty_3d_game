@@ -71,7 +71,7 @@ impl Server {
                 }
             }
             self.model.do_tick();
-            let msg = ConServerMessage::Snapshot(Snapshot::new(self.tick, &self.model));
+            let msg = ConServerMessage::SnapshotMessage(Snapshot::new(self.tick, &self.model));
             self.socket.broadcast(msg);
             next_tick_time = start_tick_time + (self.tick + 1) / TICK_SPEED;
             tick_counter += 1;
@@ -93,7 +93,7 @@ impl Server {
     fn check_timeouts(&mut self) {
         let now = Instant::now();
         for (id, client) in self.clients.iter() {
-            if now - client.last_msg_time > consts::time_out_delay() {
+            if now - client.last_msg_time > consts::playing_timeout() {
                 self.to_remove_clients.insert(*id, ConnectionCloseReason::TimedOut);
             }
         }
@@ -156,7 +156,7 @@ impl Server {
             CheckedClientMessage::Connectionless(msg, id) => {
                 self.clients.get_mut(&id).unwrap().last_msg_time = recv_time;
                 match msg {
-                    ConClientMessage::Input { tick, input } => {
+                    ConClientMessage::InputMessage { tick, input } => {
                         let client = self.clients.get_mut(&id).unwrap();
                         if tick > self.tick {
                             client.inputs.insert(tick, input);

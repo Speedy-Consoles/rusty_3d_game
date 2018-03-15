@@ -80,7 +80,7 @@ impl Graphics {
             perspective_matrix: Matrix4::identity(),
             current_visual_world: VisualWorld::new(),
             current_tick: 0,
-            last_visual_world: VisualWorld::new(),
+            last_visual_world: VisualWorld::new(), // TODO what about the first frame?
             last_tick: 0,
             mix_world: VisualWorld::new(),
         }

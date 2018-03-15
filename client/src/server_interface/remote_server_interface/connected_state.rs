@@ -10,7 +10,9 @@ use shared::tick_time::TickRate;
 use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
-use shared::net::ConClientMessage;
+use shared::net::ConServerMessage;
+use shared::net::ConServerMessage::*;
+use shared::net::ConClientMessage::*;
 use shared::net::Snapshot;
 use shared::consts::TICK_SPEED;
 use shared::consts::NEWEST_START_TICK_TIME_WEIGHT;
@@ -21,7 +23,6 @@ use shared::util::Mix;
 
 use server_interface::remote_server_interface::socket::Socket;
 use server_interface::ConnectionState;
-use server_interface::TickInfo;
 
 struct OnlineDistribution<T> where T:
         Copy
@@ -78,44 +79,33 @@ impl<T> OnlineDistribution<T> where T:
     }
 }
 
-pub struct PlayingState {
-    my_player_id: u64,
+struct AfterSnapshotData {
     start_tick_time_distribution: OnlineDistribution<Instant>,
     snapshots: HashMap<u64, Snapshot>,
     sent_inputs: HashMap<u64, CharacterInput>,
     oldest_snapshot_tick: u64,
-    tick_info: TickInfo,
+    tick: u64,
     predicted_tick: u64,
+    tick_time: Instant,
+    next_tick_time: Instant,
     model: Model,
     predicted_world: World,
 }
 
-impl PlayingState {
-    pub fn new(my_player_id: u64, snapshot: Snapshot, recv_time: Instant) -> PlayingState {
+impl AfterSnapshotData {
+    fn new(snapshot: Snapshot, recv_time: Instant) -> AfterSnapshotData {
         let start_tick_time = recv_time - snapshot.tick() / TICK_SPEED;
-        PlayingState {
-            my_player_id,
+        AfterSnapshotData {
             start_tick_time_distribution: OnlineDistribution::new(start_tick_time),
-            tick_info: TickInfo { // not a real tick info :/ but we need one
-                tick: snapshot.tick(),
-                tick_time: recv_time,
-                next_tick_time: recv_time, // must not lie in the future
-            },
+            tick: snapshot.tick(),
             predicted_tick: snapshot.tick(),
+            tick_time: recv_time - 1 / TICK_SPEED,
+            next_tick_time: recv_time,
             model: Model::new(), // maybe don't initialize this yet
             predicted_world: World::new(), // maybe don't initialize this yet
             oldest_snapshot_tick: snapshot.tick(),
             snapshots: iter::once((snapshot.tick(), snapshot)).collect(),
             sent_inputs: HashMap::new(),
-        }
-    }
-
-    pub fn connection_state(&self) -> ConnectionState {
-        ConnectionState::Connected {
-            my_player_id: self.my_player_id,
-            tick_info: self.tick_info,
-            model: &self.model,
-            predicted_world: &self.predicted_world,
         }
     }
 
@@ -143,30 +133,22 @@ impl PlayingState {
         }
     }
 
-    pub fn do_tick(&mut self, network: &Socket, character_input: CharacterInput) {
-        self.update_tick_info();
-        self.update_predict_tick();
-        self.remove_old_snapshots_and_inputs();
-        self.send_and_save_input(network, character_input);
-        self.update_model();
-    }
-
     fn update_tick_info(&mut self) {
         // we add a multiple of the standard deviation of the snapshot arrival time distribution
         // to our ticks, to make it likely that the snapshots will be on time
-        let target_tick_instant = TickInstant::new(
+        let target_tick_instant = TickInstant::from_start_tick(
             self.start_tick_time_distribution.mean()
                 + self.start_tick_time_distribution.sigma_dev(SNAPSHOT_ARRIVAL_SIGMA_FACTOR),
-            self.tick_info.next_tick_time,
+            self.next_tick_time,
             TICK_SPEED,
         );
-        self.tick_info.tick += 1;
-        self.tick_info.tick_time = self.tick_info.next_tick_time;
-        let float_tick_diff = if target_tick_instant.tick > self.tick_info.tick {
-            let tick_diff = target_tick_instant.tick - self.tick_info.tick;
+        self.tick += 1;
+        self.tick_time = self.next_tick_time;
+        let float_tick_diff = if target_tick_instant.tick > self.tick {
+            let tick_diff = target_tick_instant.tick - self.tick;
             tick_diff as f64 + target_tick_instant.intra_tick
         } else {
-            let tick_diff = self.tick_info.tick - target_tick_instant.tick;
+            let tick_diff = self.tick - target_tick_instant.tick;
             target_tick_instant.intra_tick - (tick_diff as f64)
         };
 
@@ -180,26 +162,26 @@ impl PlayingState {
             speed_factor = 1.0 + float_tick_diff * factor_factor
         } else {
             println!("WARNING: Jumping from {} to {}!",
-                     self.tick_info.tick,
+                     self.tick,
                      target_tick_instant.tick
             );
-            self.tick_info.tick = target_tick_instant.tick;
+            self.tick = target_tick_instant.tick;
             speed_factor = 1.0;
         };
         speed_factor = speed_factor.min(max_factor).max(min_factor);
         let tick_rate = TickRate::from_per_second(
             (TICK_SPEED.per_second() as f64 * speed_factor) as u64
         );
-        self.tick_info.next_tick_time = self.tick_info.tick_time + 1 / tick_rate;
+        self.next_tick_time = self.tick_time + 1 / tick_rate;
     }
 
     fn update_predict_tick(&mut self) {
-        self.predicted_tick = self.tick_info.tick + 20; // TODO use adaptive delay and prevent predicted tick decreasing
+        self.predicted_tick = self.tick + 20; // TODO use adaptive delay and prevent predicted tick decreasing
     }
 
     fn remove_old_snapshots_and_inputs(&mut self) {
         let mut new_oldest_snapshot_tick = self.oldest_snapshot_tick;
-        let mut t = self.tick_info.tick;
+        let mut t = self.tick;
         while t > self.oldest_snapshot_tick {
             if self.snapshots.contains_key(&t) {
                 new_oldest_snapshot_tick = t;
@@ -220,7 +202,7 @@ impl PlayingState {
     }
 
     fn send_and_save_input(&mut self, socket: &Socket, character_input: CharacterInput) {
-        let msg = ConClientMessage::Input {
+        let msg = InputMessage {
             tick: self.predicted_tick,
             input: character_input
         };
@@ -228,32 +210,92 @@ impl PlayingState {
         self.sent_inputs.insert(self.predicted_tick, character_input);
     }
 
-    fn update_model(&mut self) {
+    fn update_model(&mut self, my_player_id: u64) {
         let oldest_snapshot = self.snapshots.get(&self.oldest_snapshot_tick).unwrap();
         self.model = oldest_snapshot.model().clone(); // TODO do this better
-        let tick_diff = self.tick_info.tick - self.oldest_snapshot_tick;
+        let tick_diff = self.tick - self.oldest_snapshot_tick;
         if tick_diff > 0 {
             println!(
                 "WARNING: {} ticks ahead of snapshots! | \
                         Current tick: {} | Tick of oldest snapshot: {}",
                 tick_diff,
-                self.tick_info.tick,
+                self.tick,
                 self.oldest_snapshot_tick
             );
         }
-        for tick in (self.oldest_snapshot_tick + 1)..(self.tick_info.tick + 1) {
+        for tick in (self.oldest_snapshot_tick + 1)..(self.tick + 1) {
             if let Some(input) = self.sent_inputs.get(&tick) {
-                self.model.set_character_input(self.my_player_id, *input);
+                self.model.set_character_input(my_player_id, *input);
             }
             self.model.do_tick();
         }
 
         self.predicted_world = self.model.world().clone();
-        for tick in (self.tick_info.tick + 1)..(self.predicted_tick + 1) {
+        for tick in (self.tick + 1)..(self.predicted_tick + 1) {
             if let Some(&input) = self.sent_inputs.get(&tick) {
-                self.predicted_world.set_character_input(self.my_player_id, input);
+                self.predicted_world.set_character_input(my_player_id, input);
             }
             self.predicted_world.do_tick();
+        }
+    }
+}
+
+pub struct ConnectedState {
+    my_player_id: u64,
+    after_snapshot_data: Option<AfterSnapshotData>,
+}
+
+impl ConnectedState {
+    pub fn new(my_player_id: u64) -> ConnectedState {
+        ConnectedState {
+            my_player_id,
+            after_snapshot_data: None,
+        }
+    }
+
+    pub fn do_tick(&mut self, network: &Socket, character_input: CharacterInput) {
+        if let Some(ref mut data) = self.after_snapshot_data {
+            data.update_tick_info();
+            data.update_predict_tick();
+            data.remove_old_snapshots_and_inputs();
+            data.send_and_save_input(network, character_input);
+            data.update_model(self.my_player_id);
+        }
+    }
+
+    pub fn next_tick_time(&self) -> Option<Instant> {
+        match self.after_snapshot_data {
+            None => None,
+            Some(ref data) => Some(data.next_tick_time),
+        }
+    }
+
+    pub fn connection_state(&self) -> ConnectionState {
+        match self.after_snapshot_data {
+            None => ConnectionState::Connecting,
+            Some(ref data) => ConnectionState::Connected {
+                my_player_id: self.my_player_id,
+                tick_instant: TickInstant::from_interval(
+                    data.tick, data.tick_time,
+                    data.next_tick_time,
+                    Instant::now()
+                ),
+                model: &data.model,
+                predicted_world: &data.predicted_world,
+            }
+        }
+    }
+
+    pub fn handle_message(&mut self, msg: ConServerMessage) {
+        let recv_time = Instant::now();
+        match msg {
+            SnapshotMessage(snapshot) => match self.after_snapshot_data {
+                None => self.after_snapshot_data = Some(
+                    AfterSnapshotData::new(snapshot, recv_time)
+                ),
+                Some(ref mut data) => data.on_snapshot(snapshot, recv_time),
+            },
+            ConnectionClose(_) => (), // handled earlier
         }
     }
 }

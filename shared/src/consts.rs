@@ -12,11 +12,21 @@ pub const TICK_SPEED: TickRate = TickRate { per_second: 120 };
 // TODO move const fixed points from model here
 
 // network
-pub fn time_out_delay() -> Duration {
+pub fn playing_timeout() -> Duration {
     Duration::from_secs(30)
 }
 
+pub fn connection_request_resend_interval() -> Duration {
+    Duration::from_secs(1)
+}
+
+pub fn disconnect_force_timeout() -> Duration {
+    Duration::from_secs(1)
+}
+
 // CLIENT
+
+pub const BASE_SPEED: TickRate = TickRate { per_second: 60 };
 
 // files
 pub const CLIENT_CONFIG_FILE: &'static str = "client_conf.toml";

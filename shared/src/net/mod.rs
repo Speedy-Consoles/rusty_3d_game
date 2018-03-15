@@ -40,7 +40,7 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ConClientMessage {
     DisconnectRequest,
-    Input { tick: u64, input: CharacterInput, },
+    InputMessage { tick: u64, input: CharacterInput, },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,7 +101,7 @@ pub enum ConLessServerMessage {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ConServerMessage {
     ConnectionClose(ConnectionCloseReason),
-    Snapshot(Snapshot),
+    SnapshotMessage(Snapshot),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -21,7 +21,7 @@ use glium::glutin;
 use glium::backend::glutin::Display;
 
 use shared::math::FPAngle;
-use shared::consts::TICK_SPEED;
+use shared::consts::BASE_SPEED;
 use shared::consts::DRAW_SPEED;
 use shared::model::world::character::CharacterInput;
 
@@ -94,7 +94,6 @@ impl Client {
 
         // for sleep timing
         let mut next_draw_time = Instant::now();
-        let mut next_tick_time = Instant::now();
 
         // main loop
         loop {
@@ -104,7 +103,7 @@ impl Client {
 
             // tick
             let before_tick = Instant::now();
-            if before_tick >= next_tick_time {
+            if self.server_interface.next_tick_time().map_or(false, |t| before_tick >= t) {
                 let mut character_input = self.character_input;
                 if self.menu.active() {
                     character_input = Default::default();
@@ -112,11 +111,6 @@ impl Client {
                 }
                 self.server_interface.do_tick(character_input);
                 self.character_input.reset_flags();
-                if let Connected { tick_info, .. } = self.server_interface.connection_state() {
-                    next_tick_time = tick_info.next_tick_time;
-                } else {
-                    next_tick_time = next_tick_time + 1 / TICK_SPEED;
-                }
                 tick_counter += 1;
             }
 
@@ -125,7 +119,7 @@ impl Client {
             // draw
             let before_draw = Instant::now();
             if before_draw >= next_draw_time {
-                if let Connected { tick_info, my_player_id, model, predicted_world }
+                if let Connected { tick_instant, my_player_id, model, predicted_world }
                         = self.server_interface.connection_state() {
                     let view_dir = if self.config.direct_camera {
                         Some(self.character_input.view_dir)
@@ -138,7 +132,7 @@ impl Client {
                         predicted_world,
                         my_player_id,
                         view_dir,
-                        tick_info.now(),
+                        tick_instant,
                         &self.display
                     );
                     draw_counter += 1;
@@ -157,7 +151,10 @@ impl Client {
             }
 
             // sleep / handle traffic
-            self.server_interface.handle_traffic(next_tick_time.min(next_draw_time));
+            let min_loop_rate_time = Instant::now() + 1 / BASE_SPEED;
+            let next_loop_time = self.server_interface.next_tick_time()
+                .unwrap_or(min_loop_rate_time).min(next_draw_time);
+            self.server_interface.handle_traffic(next_loop_time);
 
             // handle closing request
             if self.closing {
