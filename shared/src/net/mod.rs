@@ -8,6 +8,7 @@ use bincode::deserialize;
 use serde::Serialize;
 use serde::Deserialize;
 
+use tick_time::TickInstant;
 use model::Model;
 use model::world::character::CharacterInput;
 
@@ -102,6 +103,10 @@ pub enum ConLessServerMessage {
 pub enum ConServerMessage {
     ConnectionClose(ConnectionCloseReason),
     SnapshotMessage(Snapshot),
+    InputAck {
+        input_tick: u64,
+        arrival_tick_instant: TickInstant,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]

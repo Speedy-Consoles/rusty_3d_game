@@ -47,3 +47,12 @@ impl Mix for Instant {
         *self + duration_from_float(duration_as_float(*other - *self) * factor)
     }
 }
+
+impl Mix for Duration {
+    fn mix(&self, other: &Duration, factor: f64) -> Duration {
+        if *self > *other {
+            return other.mix(self, 1.0 - factor);
+        }
+        *self + duration_from_float(duration_as_float(*other - *self) * factor)
+    }
+}

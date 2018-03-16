@@ -13,10 +13,11 @@ use shared::consts;
 use shared::consts::TICK_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
-use shared::net::ConClientMessage;
-use shared::net::ConLessClientMessage;
-use shared::net::ConServerMessage;
-use shared::net::ConLessServerMessage;
+use shared::tick_time::TickInstant;
+use shared::net::ConClientMessage::*;
+use shared::net::ConLessClientMessage::*;
+use shared::net::ConServerMessage::*;
+use shared::net::ConLessServerMessage::*;
 use shared::net::Snapshot;
 use shared::net::ConnectionCloseReason;
 
@@ -32,6 +33,8 @@ pub struct Server {
     socket: Socket,
     model: Model,
     tick: u64,
+    tick_time: Instant,
+    next_tick_time: Instant,
     clients: HashMap<u64, Client>,
     to_remove_clients: HashMap<u64, ConnectionCloseReason>,
     closing: bool,
@@ -43,6 +46,8 @@ impl Server {
             socket: Socket::new(51946)?,
             model: Model::new(),
             tick: 0,
+            tick_time: Instant::now(),
+            next_tick_time: Instant::now(),
             clients: HashMap::new(),
             to_remove_clients: HashMap::new(),
             closing: false,
@@ -56,10 +61,14 @@ impl Server {
 
         // for sleep timing
         let start_tick_time = Instant::now();
-        let mut next_tick_time;
+        self.next_tick_time = Instant::now();
 
         // main loop
         while !self.closing { // TODO add way to exit
+            // update tick times
+            self.tick_time = self.next_tick_time;
+            self.next_tick_time = start_tick_time + (self.tick + 1) / TICK_SPEED;
+
             // update clients
             self.check_timeouts();
             self.remove_clients();
@@ -71,9 +80,8 @@ impl Server {
                 }
             }
             self.model.do_tick();
-            let msg = ConServerMessage::SnapshotMessage(Snapshot::new(self.tick, &self.model));
+            let msg = SnapshotMessage(Snapshot::new(self.tick, &self.model));
             self.socket.broadcast(msg);
-            next_tick_time = start_tick_time + (self.tick + 1) / TICK_SPEED;
             tick_counter += 1;
 
             // display tick rate
@@ -85,7 +93,7 @@ impl Server {
             }
 
             // sleep / handle traffic
-            self.handle_traffic(next_tick_time);
+            self.handle_traffic();
             self.tick += 1;
         }
     }
@@ -104,24 +112,24 @@ impl Server {
         for (id, reason) in self.to_remove_clients.drain() {
             let _name = self.model.remove_player(id).unwrap().take_name(); // TODO for leave message
             self.clients.remove(&id);
-            let msg = ConServerMessage::ConnectionClose(reason);
+            let msg = ConnectionClose(reason);
             self.socket.send_to_connected(msg, id);
             self.socket.remove_client(id);
-            // TODO send leave message
+            // TODO broadcast leave message
         }
     }
 
-    fn handle_traffic(&mut self, until: Instant) {
+    fn handle_traffic(&mut self) {
         loop {
-            match self.socket.recv_from_until(until) {
+            match self.socket.recv_from_until(self.next_tick_time) {
                 Ok(Some(msg)) => self.handle_message(msg),
                 Ok(None) => break,
                 Err(e) => {
                     println!("ERROR: Network broken: {:?}", e);
                     self.closing = true;
                     let now = Instant::now();
-                    if now < until {
-                        thread::sleep(until - now);
+                    if now < self.next_tick_time {
+                        thread::sleep(self.next_tick_time - now);
                     }
                     break;
                 }
@@ -135,7 +143,7 @@ impl Server {
         match message {
             CheckedClientMessage::Connected(msg, addr) => {
                 match msg {
-                    ConLessClientMessage::ConnectionRequest => {
+                    ConnectionRequest => {
                         if let Some(_id) = self.socket.client_id_by_addr(addr) {
                             // TODO send another connection confirm to client and reset their connection meta data
                         } else {
@@ -146,7 +154,7 @@ impl Server {
                             });
                             self.socket.add_client(new_id, addr);
                             self.socket.send_to_connectionless(
-                                ConLessServerMessage::ConnectionConfirm(new_id),
+                                ConnectionConfirm(new_id),
                                 addr,
                             );
                         }
@@ -156,11 +164,23 @@ impl Server {
             CheckedClientMessage::Connectionless(msg, id) => {
                 self.clients.get_mut(&id).unwrap().last_msg_time = recv_time;
                 match msg {
-                    ConClientMessage::InputMessage { tick, input } => {
+                    InputMessage { tick, input } => {
                         let client = self.clients.get_mut(&id).unwrap();
                         if tick > self.tick {
-                            client.inputs.insert(tick, input);
+                            self.socket.send_to_connected(
+                                InputAck {
+                                    input_tick: tick,
+                                    arrival_tick_instant: TickInstant::from_interval(
+                                        self.tick,
+                                        self.tick_time,
+                                        self.next_tick_time,
+                                        recv_time,
+                                    )
+                                },
+                                id,
+                            );
                             // TODO ignore insanely high ticks
+                            client.inputs.insert(tick, input);
                         } else {
                             println!(
                                 "Input came too late! | Current tick: {} | Target tick: {}",
@@ -169,7 +189,7 @@ impl Server {
                             );
                         }
                     },
-                    ConClientMessage::DisconnectRequest => {
+                    DisconnectRequest => {
                         self.to_remove_clients.insert(id, ConnectionCloseReason::UserDisconnect);
                     },
                 }

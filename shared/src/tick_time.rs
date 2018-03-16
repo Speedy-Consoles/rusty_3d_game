@@ -1,11 +1,12 @@
 use std::time::Instant;
 use std::time::Duration;
+use std::ops::Sub;
 use std::ops::Mul;
 use std::ops::Div;
 
 use util;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TickInstant {
     pub tick: u64,
     pub intra_tick: f64,
@@ -39,6 +40,29 @@ impl TickInstant {
                 tick,
                 intra_tick: util::duration_as_float(part_dur) / util::duration_as_float(whole_dur),
             }
+        }
+    }
+
+    pub fn zero() -> TickInstant {
+        TickInstant {
+            tick: 0,
+            intra_tick: 0.0,
+        }
+    }
+}
+
+impl Sub<TickInstant> for TickInstant {
+    type Output = TickDiff;
+    fn sub(self, rhs: TickInstant) -> TickDiff {
+        let mut ticks = self.tick - rhs.tick;
+        let mut tick_fraction = self.intra_tick - rhs.intra_tick;
+        if tick_fraction < 0.0 {
+            tick_fraction += 1.0;
+            ticks -= 1;
+        }
+        TickDiff {
+            ticks,
+            tick_fraction,
         }
     }
 }

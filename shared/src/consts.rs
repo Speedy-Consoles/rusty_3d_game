@@ -3,6 +3,8 @@ use std::f64::consts::PI;
 
 use tick_time::TickRate;
 
+// TODO make functions const
+
 // SHARED
 
 // ticks
@@ -14,14 +16,6 @@ pub const TICK_SPEED: TickRate = TickRate { per_second: 120 };
 // network
 pub fn playing_timeout() -> Duration {
     Duration::from_secs(30)
-}
-
-pub fn connection_request_resend_interval() -> Duration {
-    Duration::from_secs(1)
-}
-
-pub fn disconnect_force_timeout() -> Duration {
-    Duration::from_secs(1)
 }
 
 // CLIENT
@@ -41,5 +35,21 @@ pub const DRAW_SPEED: TickRate = TickRate { per_second: 60 }; // TODO move to co
 // network
 //pub const MAX_PREDICT_TICKS: usize = 120;
 pub const NEWEST_START_TICK_TIME_WEIGHT: f64 = 0.001;
-pub const NEWEST_START_TICK_TIME_DEVIATION_WEIGHT: f64 = 0.005;
 pub const SNAPSHOT_ARRIVAL_SIGMA_FACTOR: f64 = 3.0;
+
+pub const NEWEST_START_PREDICTED_TICK_TIME_WEIGHT: f64 = 0.001;
+pub const INPUT_ARRIVAL_SIGMA_FACTOR: f64 = 4.0;
+
+pub fn max_input_keep_time() -> Duration {
+    Duration::from_secs(2)
+}
+
+pub fn connection_request_resend_interval() -> Duration {
+    Duration::from_secs(1)
+}
+
+pub fn disconnect_force_timeout() -> Duration {
+    Duration::from_secs(1)
+}
+
+// SERVER

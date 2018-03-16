@@ -14,10 +14,12 @@ use shared::net::ConServerMessage;
 use shared::net::ConServerMessage::*;
 use shared::net::ConClientMessage::*;
 use shared::net::Snapshot;
+use shared::consts;
 use shared::consts::TICK_SPEED;
 use shared::consts::NEWEST_START_TICK_TIME_WEIGHT;
-use shared::consts::NEWEST_START_TICK_TIME_DEVIATION_WEIGHT;
 use shared::consts::SNAPSHOT_ARRIVAL_SIGMA_FACTOR;
+use shared::consts::NEWEST_START_PREDICTED_TICK_TIME_WEIGHT;
+use shared::consts::INPUT_ARRIVAL_SIGMA_FACTOR;
 use shared::util;
 use shared::util::Mix;
 
@@ -49,25 +51,19 @@ impl<T> OnlineDistribution<T> where T:
         }
     }
 
-    fn add_sample(&mut self, sample: T) {
+    fn add_sample(&mut self, sample: T, weight: f64) {
         let old_diff = if sample > self.mean {
             util::duration_as_float(sample - self.mean)
         } else {
             -util::duration_as_float(self.mean - sample)
         };
-        self.mean = self.mean.mix(
-            &sample,
-            NEWEST_START_TICK_TIME_WEIGHT
-        );
+        self.mean = self.mean.mix(&sample, weight);
         let new_diff = if sample > self.mean {
             util::duration_as_float(sample - self.mean)
         } else {
             -util::duration_as_float(self.mean - sample)
         };
-        self.variance = self.variance.mix(
-            &(old_diff * new_diff),
-            NEWEST_START_TICK_TIME_DEVIATION_WEIGHT
-        );
+        self.variance = self.variance.mix(&(old_diff * new_diff), weight);
     }
 
     fn mean(&self) -> T {
@@ -80,32 +76,36 @@ impl<T> OnlineDistribution<T> where T:
 }
 
 struct AfterSnapshotData {
-    start_tick_time_distribution: OnlineDistribution<Instant>,
-    snapshots: HashMap<u64, Snapshot>,
-    sent_inputs: HashMap<u64, CharacterInput>,
-    oldest_snapshot_tick: u64,
     tick: u64,
     predicted_tick: u64,
     tick_time: Instant,
     next_tick_time: Instant,
     model: Model,
     predicted_world: World,
+    start_tick_time_distribution: OnlineDistribution<Instant>,
+    oldest_snapshot_tick: u64,
+    snapshots: HashMap<u64, Snapshot>,
+    start_predicted_tick_distribution: OnlineDistribution<Instant>,
+    sent_inputs: HashMap<u64, CharacterInput>,
+    sent_input_times: HashMap<u64, Instant>,
 }
 
 impl AfterSnapshotData {
     fn new(snapshot: Snapshot, recv_time: Instant) -> AfterSnapshotData {
         let start_tick_time = recv_time - snapshot.tick() / TICK_SPEED;
         AfterSnapshotData {
-            start_tick_time_distribution: OnlineDistribution::new(start_tick_time),
             tick: snapshot.tick(),
             predicted_tick: snapshot.tick(),
             tick_time: recv_time - 1 / TICK_SPEED,
             next_tick_time: recv_time,
             model: Model::new(), // maybe don't initialize this yet
             predicted_world: World::new(), // maybe don't initialize this yet
+            start_tick_time_distribution: OnlineDistribution::new(start_tick_time),
             oldest_snapshot_tick: snapshot.tick(),
             snapshots: iter::once((snapshot.tick(), snapshot)).collect(),
+            start_predicted_tick_distribution: OnlineDistribution::new(start_tick_time), // TODO better initial value
             sent_inputs: HashMap::new(),
+            sent_input_times: HashMap::new(),
         }
     }
 
@@ -125,7 +125,10 @@ impl AfterSnapshotData {
                 );
             }
         }
-        self.start_tick_time_distribution.add_sample(start_tick_time);
+        self.start_tick_time_distribution.add_sample(
+            start_tick_time,
+            NEWEST_START_TICK_TIME_WEIGHT
+        );
         if snapshot.tick() > self.oldest_snapshot_tick {
             self.snapshots.insert(snapshot.tick(), snapshot);
         } else {
@@ -133,17 +136,28 @@ impl AfterSnapshotData {
         }
     }
 
-    fn update_tick_info(&mut self) {
+    fn on_input_ack(&mut self, input_tick: u64, arrival_tick_instant: TickInstant) {
+        if let Some(send_time) = self.sent_input_times.get(&input_tick) {
+            let start_predicted_tick_time = *send_time
+                - (arrival_tick_instant - TickInstant::zero()) / TICK_SPEED;
+            self.start_predicted_tick_distribution.add_sample(
+                start_predicted_tick_time,
+                NEWEST_START_PREDICTED_TICK_TIME_WEIGHT,
+            );
+        }
+    }
+
+    fn update_tick(&mut self) {
+        self.tick += 1;
+        self.tick_time = self.next_tick_time;
         // we add a multiple of the standard deviation of the snapshot arrival time distribution
         // to our ticks, to make it likely that the snapshots will be on time
         let target_tick_instant = TickInstant::from_start_tick(
             self.start_tick_time_distribution.mean()
                 + self.start_tick_time_distribution.sigma_dev(SNAPSHOT_ARRIVAL_SIGMA_FACTOR),
-            self.next_tick_time,
+            self.tick_time,
             TICK_SPEED,
         );
-        self.tick += 1;
-        self.tick_time = self.next_tick_time;
         let float_tick_diff = if target_tick_instant.tick > self.tick {
             let tick_diff = target_tick_instant.tick - self.tick;
             tick_diff as f64 + target_tick_instant.intra_tick
@@ -175,11 +189,35 @@ impl AfterSnapshotData {
         self.next_tick_time = self.tick_time + 1 / tick_rate;
     }
 
-    fn update_predict_tick(&mut self) {
-        self.predicted_tick = self.tick + 20; // TODO use adaptive delay and prevent predicted tick decreasing
+    fn send_and_save_input(&mut self, socket: &Socket, character_input: CharacterInput) {
+        self.predicted_tick += 1;
+        let send_time = Instant::now();
+        // we add a multiple of the standard deviation of the input arrival time distribution
+        // to our ticks, to make it likely that the snapshots will be on time
+        let arrival_tick_instant = TickInstant::from_start_tick(
+            self.start_predicted_tick_distribution.mean()
+                + self.start_predicted_tick_distribution.sigma_dev(INPUT_ARRIVAL_SIGMA_FACTOR),
+            send_time,
+            TICK_SPEED,
+        );
+        let target_predicted_tick = arrival_tick_instant.tick + 1;
+        if target_predicted_tick >= self.predicted_tick {
+            self.predicted_tick = target_predicted_tick;
+        } else {
+            self.predicted_tick -= 1; // TODO decrease in rates smaller than one (every other tick or something)
+        }
+
+        let msg = InputMessage {
+            tick: self.predicted_tick,
+            input: character_input
+        };
+        socket.send_connected(msg);
+        self.sent_input_times.insert(self.predicted_tick, Instant::now());
+        self.sent_inputs.insert(self.predicted_tick, character_input);
     }
 
     fn remove_old_snapshots_and_inputs(&mut self) {
+        // TODO make this more efficient
         let mut new_oldest_snapshot_tick = self.oldest_snapshot_tick;
         let mut t = self.tick;
         while t > self.oldest_snapshot_tick {
@@ -199,15 +237,8 @@ impl AfterSnapshotData {
             self.sent_inputs.remove(&t);
         }
         self.oldest_snapshot_tick = new_oldest_snapshot_tick;
-    }
-
-    fn send_and_save_input(&mut self, socket: &Socket, character_input: CharacterInput) {
-        let msg = InputMessage {
-            tick: self.predicted_tick,
-            input: character_input
-        };
-        socket.send_connected(msg);
-        self.sent_inputs.insert(self.predicted_tick, character_input);
+        let now = Instant::now();
+        self.sent_input_times.retain(|_, time| now - *time < consts::max_input_keep_time() )
     }
 
     fn update_model(&mut self, my_player_id: u64) {
@@ -255,10 +286,9 @@ impl ConnectedState {
 
     pub fn do_tick(&mut self, network: &Socket, character_input: CharacterInput) {
         if let Some(ref mut data) = self.after_snapshot_data {
-            data.update_tick_info();
-            data.update_predict_tick();
-            data.remove_old_snapshots_and_inputs();
+            data.update_tick();
             data.send_and_save_input(network, character_input);
+            data.remove_old_snapshots_and_inputs();
             data.update_model(self.my_player_id);
         }
     }
@@ -295,6 +325,11 @@ impl ConnectedState {
                 ),
                 Some(ref mut data) => data.on_snapshot(snapshot, recv_time),
             },
+            InputAck { input_tick, arrival_tick_instant } => {
+                if let Some(ref mut data) = self.after_snapshot_data {
+                    data.on_input_ack(input_tick, arrival_tick_instant);
+                }
+            }
             ConnectionClose(_) => (), // handled earlier
         }
     }
