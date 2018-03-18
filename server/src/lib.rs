@@ -14,6 +14,7 @@ use shared::consts::TICK_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::tick_time::TickInstant;
+use shared::net::socket::Socket;
 use shared::net::ConClientMessage::*;
 use shared::net::ConLessClientMessage::*;
 use shared::net::ConServerMessage::*;
@@ -21,7 +22,7 @@ use shared::net::ConLessServerMessage::*;
 use shared::net::Snapshot;
 use shared::net::ConnectionCloseReason;
 
-use socket::Socket;
+use socket::ServerSocket;
 use socket::CheckedClientMessage;
 
 struct Client {
@@ -30,7 +31,7 @@ struct Client {
 }
 
 pub struct Server {
-    socket: Socket,
+    socket: ServerSocket,
     model: Model,
     tick: u64,
     tick_time: Instant,
@@ -43,7 +44,7 @@ pub struct Server {
 impl Server {
     pub fn new() -> io::Result<Server> {
         Ok(Server {
-            socket: Socket::new(51946)?,
+            socket: ServerSocket::new(51946)?,
             model: Model::new(),
             tick: 0,
             tick_time: Instant::now(),

@@ -1,3 +1,5 @@
+pub mod socket;
+
 use std::io::Cursor;
 use std::cmp::Ordering;
 
@@ -6,7 +8,7 @@ use bincode::serialize_into;
 use bincode::deserialize;
 
 use serde::Serialize;
-use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 use tick_time::TickInstant;
 use model::Model;
@@ -15,13 +17,13 @@ use model::world::character::CharacterInput;
 
 pub const MAX_MESSAGE_LENGTH: usize = 1024;
 
-pub trait Packable<'a>: Sized {
-    fn unpack(buf: &'a [u8]) -> bincode::Result<Self>;
+pub trait Packable: Sized {
+    fn unpack(buf: &[u8]) -> bincode::Result<Self>;
     fn pack(&self, buf: &mut [u8]) -> bincode::Result<usize>;
 }
 
-impl<'a, T: Serialize + Deserialize<'a>> Packable<'a> for T {
-    fn unpack(buf: &'a [u8]) -> bincode::Result<Self> {
+impl<T: Serialize + DeserializeOwned> Packable for T {
+    fn unpack(buf: &[u8]) -> bincode::Result<Self> {
         deserialize(buf)
     }
 

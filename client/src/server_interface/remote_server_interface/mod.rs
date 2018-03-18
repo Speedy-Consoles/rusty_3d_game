@@ -21,7 +21,7 @@ use super::ConnectionState;
 use super::ServerInterface;
 use self::connected_state::ConnectedState;
 use self::InternalState::*;
-use self::socket::Socket;
+use self::socket::ClientSocket;
 
 enum InternalState {
     Connecting {
@@ -37,12 +37,12 @@ enum InternalState {
 
 pub struct RemoteServerInterface {
     internal_state: InternalState,
-    socket: Socket,
+    socket: ClientSocket,
 }
 
 impl RemoteServerInterface {
     pub fn new(addr: SocketAddr) -> io::Result<RemoteServerInterface> {
-        let socket = Socket::new(addr)?;
+        let socket = ClientSocket::new(addr)?;
         Ok(RemoteServerInterface {
             socket,
             internal_state: Connecting {

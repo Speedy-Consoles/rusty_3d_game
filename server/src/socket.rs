@@ -1,20 +1,18 @@
 use std::io;
-use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::net::UdpSocket;
-use std::time::Instant;
+use std::time::Duration;
 use std::collections::HashMap;
 
 use net2::UdpBuilder;
 
+use shared::net::socket::Socket;
 use shared::net::ClientMessage;
 use shared::net::ConClientMessage;
 use shared::net::ConLessClientMessage;
 use shared::net::ServerMessage;
 use shared::net::ConServerMessage;
 use shared::net::ConLessServerMessage;
-use shared::net::Packable;
-use shared::net::MAX_MESSAGE_LENGTH;
 
 use self::CheckedClientMessage::*;
 
@@ -23,16 +21,16 @@ pub enum CheckedClientMessage {
     Connectionless(ConClientMessage, u64),
 }
 
-pub struct Socket {
+pub struct ServerSocket {
     udp_socket: UdpSocket,
     client_ids_by_addr: HashMap<SocketAddr, u64>,
     client_addrs_by_id: HashMap<u64, SocketAddr>,
 }
 
-impl Socket {
-    pub fn new(port: u16) -> io::Result<Socket> {
+impl ServerSocket {
+    pub fn new(port: u16) -> io::Result<ServerSocket> {
         // create IPv6 UDP socket with IPv4 compatibility
-        Ok(Socket {
+        Ok(ServerSocket {
             udp_socket: UdpBuilder::new_v6()?.only_v6(false)?.bind(("::", port))?,
             client_ids_by_addr: HashMap::new(),
             client_addrs_by_id: HashMap::new(),
@@ -64,71 +62,45 @@ impl Socket {
         self.send_to(&ServerMessage::Connectionless(msg), addr);
     }
 
-    fn send_to(&self, msg: &ServerMessage, addr: SocketAddr) {
-        let mut buf = [0; MAX_MESSAGE_LENGTH];
-        let amount = msg.pack(&mut buf).unwrap();
-        self.udp_socket.send_to(&buf[..amount], addr).unwrap();
-    }
-
     pub fn broadcast(&self, msg: ConServerMessage) {
         let cmsg = ServerMessage::Connected(msg);
         for addr in self.client_ids_by_addr.keys() {
             self.send_to(&cmsg, *addr);
         }
     }
+}
 
-    pub fn recv_from_until(&self, until: Instant) -> io::Result<Option<CheckedClientMessage>> {
-        // first make sure we read a message if there are any
-        self.udp_socket.set_nonblocking(true).unwrap();
-        let result = self.recv_from();
-        self.udp_socket.set_nonblocking(false).unwrap();
-        let mut option = result?;
-
-        // if there was no message, wait for one until time out
-        if option.is_none() {
-            let now = Instant::now();
-            if until <= now {
-                return Ok(None);
-            }
-            self.udp_socket.set_read_timeout(Some(until - now)).unwrap();
-            option = self.recv_from()?;
-        }
-        Ok(option)
+impl Socket<ServerMessage, ClientMessage, SocketAddr, CheckedClientMessage> for ServerSocket {
+    fn send_impl(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
+        self.udp_socket.send_to(buf, addr)
     }
 
-    // reads messages until there is a valid one or an error occurs
-    // time out errors are transformed into None
-    fn recv_from(&self) -> io::Result<Option<CheckedClientMessage>> {
-        let mut buf = [0; MAX_MESSAGE_LENGTH];
-        loop {
-            match self.udp_socket.recv_from(&mut buf) {
-                Ok((amount, addr)) => {
-                    match ClientMessage::unpack(&buf[..amount]) {
-                        Ok(ClientMessage::Connected(msg)) => {
-                            if let Some(id) = self.client_ids_by_addr.get(&addr) {
-                                return Ok(Some(Connectionless(msg, *id)));
-                            } else {
-                                println!("WARNING: Received connectionful message \
-                                         without connection!");
-                                // TODO send connection reset
-                            }
-                        },
-                        Ok(ClientMessage::Connectionless(msg)) => {
-                            return Ok(Some(Connected(msg, addr)));
-                        },
-                        Err(e) => println!(
-                            "DEBUG: Received malformed message. Unpack error: {:?}",
-                            e,
-                        ),
-                    }
-                },
-                Err(e) => {
-                    match e.kind() {
-                        ErrorKind::WouldBlock | ErrorKind::TimedOut => return Ok(None),
-                        _ => return Err(e),
-                    };
+    fn recv_impl(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        self.udp_socket.recv_from(buf)
+    }
+
+    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        self.udp_socket.set_nonblocking(nonblocking)
+    }
+
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.udp_socket.set_read_timeout(timeout)
+    }
+
+    fn check_msg(&self, msg: ClientMessage, addr: SocketAddr) -> Option<CheckedClientMessage> {
+        match msg {
+            ClientMessage::Connected(msg) => {
+                if let Some(id) = self.client_ids_by_addr.get(&addr) {
+                    Some(Connectionless(msg, *id))
+                } else {
+                    println!("WARNING: Received connectionful message without connection!");
+                    // TODO send connection reset
+                    None
                 }
-            }
+            },
+            ClientMessage::Connectionless(msg) => {
+                Some(Connected(msg, addr))
+            },
         }
     }
 }

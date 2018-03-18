@@ -23,7 +23,7 @@ use shared::consts::INPUT_ARRIVAL_SIGMA_FACTOR;
 use shared::util;
 use shared::util::Mix;
 
-use server_interface::remote_server_interface::socket::Socket;
+use server_interface::remote_server_interface::socket::ClientSocket;
 use server_interface::ConnectionState;
 
 struct OnlineDistribution<T> where T:
@@ -189,7 +189,7 @@ impl AfterSnapshotData {
         self.next_tick_time = self.tick_time + 1 / tick_rate;
     }
 
-    fn send_and_save_input(&mut self, socket: &Socket, character_input: CharacterInput) {
+    fn send_and_save_input(&mut self, socket: &ClientSocket, character_input: CharacterInput) {
         self.predicted_tick += 1;
         let send_time = Instant::now();
         // we add a multiple of the standard deviation of the input arrival time distribution
@@ -217,7 +217,7 @@ impl AfterSnapshotData {
     }
 
     fn remove_old_snapshots_and_inputs(&mut self) {
-        // TODO make this more efficient
+        // TODO make this function more efficient
         let mut new_oldest_snapshot_tick = self.oldest_snapshot_tick;
         let mut t = self.tick;
         while t > self.oldest_snapshot_tick {
@@ -284,7 +284,7 @@ impl ConnectedState {
         }
     }
 
-    pub fn do_tick(&mut self, network: &Socket, character_input: CharacterInput) {
+    pub fn do_tick(&mut self, network: &ClientSocket, character_input: CharacterInput) {
         if let Some(ref mut data) = self.after_snapshot_data {
             data.update_tick();
             data.send_and_save_input(network, character_input);
