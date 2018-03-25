@@ -3,12 +3,14 @@ mod socket;
 
 use std::time::Instant;
 use std::io;
+use std::mem;
 use std::net::UdpSocket;
 use std::net::SocketAddr;
 use std::thread;
 
 use shared::model::world::character::CharacterInput;
 use shared::consts;
+use shared::net::socket::SendQueue;
 use shared::net::socket::RecvQueue;
 use shared::net::socket::RecvQueueProvider;
 use shared::net::socket::ReliableSocket;
@@ -34,17 +36,19 @@ enum InternalState {
     },
     Connected {
         state: ConnectedState,
-        recv_queue: RecvQueue,
+        send_queue: SendQueue<ClientMessage>,
+        recv_queue: RecvQueue<ServerMessage>,
     },
     Disconnecting {
+        send_queue: SendQueue<ClientMessage>,
         force_timeout_time: Instant,
     },
     ConnectionClosed(ConnectionCloseReason),
     NetworkError(io::Error),
 }
 
-impl RecvQueueProvider<()> for InternalState {
-    fn recv_queue(&mut self, _addr: ()) -> Option<&mut RecvQueue> {
+impl RecvQueueProvider<(), ServerMessage> for InternalState {
+    fn recv_queue(&mut self, _addr: ()) -> Option<&mut RecvQueue<ServerMessage>> {
         match self {
             &mut Connected { ref mut recv_queue, .. } => Some(recv_queue),
             _ => None,
@@ -85,7 +89,8 @@ impl RemoteServerInterface {
                     if let ServerMessage::Conless(ConnectionConfirm(my_player_id)) = message {
                         self.internal_state = Connected {
                             state: ConnectedState::new(my_player_id),
-                            recv_queue: RecvQueue {}, // TODO
+                            send_queue: SendQueue::new(),
+                            recv_queue: RecvQueue::new(),
                         };
                     }
                 },
@@ -113,7 +118,7 @@ impl ServerInterface for RemoteServerInterface {
             Connected { ref mut state, .. } => {
                 result = state.do_tick(&self.socket, character_input)
             },
-            Disconnecting { force_timeout_time } => {
+            Disconnecting { force_timeout_time, .. } => {
                 if Instant::now() > force_timeout_time {
                     self.internal_state = ConnectionClosed(TimedOut);
                 }
@@ -164,22 +169,28 @@ impl ServerInterface for RemoteServerInterface {
         match self.internal_state {
             Connecting { resend_time } => Some(resend_time),
             Connected { ref state, .. } => state.next_tick_time(),
-            Disconnecting { force_timeout_time } => Some(force_timeout_time),
+            Disconnecting { force_timeout_time, .. } => Some(force_timeout_time),
             ConnectionClosed(_) | NetworkError(_) => None,
         }
     }
 
     fn disconnect(&mut self) {
-        let mut result = Ok(());
-        match self.internal_state {
-            Connecting { .. } | Connected { .. } => {
-                self.internal_state = Disconnecting {
-                    force_timeout_time: Instant::now() + consts::disconnect_force_timeout()
-                };
-                result = self.socket.send_to_reliable(DisconnectRequest, ());
+        let send_queue = match self.internal_state {
+            Connecting { .. } => SendQueue::new(),
+            Connected { ref mut send_queue, .. } => {
+                mem::replace(send_queue, SendQueue::new())
             },
-            Disconnecting { .. } | ConnectionClosed(_) | NetworkError(_) => (),
-        }
+            _ => return,
+        };
+        self.internal_state = Disconnecting {
+            send_queue: send_queue,
+            force_timeout_time: Instant::now() + consts::disconnect_force_timeout()
+        };
+        let result = if let Disconnecting { ref mut send_queue, .. } = self.internal_state {
+            self.socket.send_to_reliable(DisconnectRequest, (), send_queue)
+        } else {
+            unreachable!()
+        };
         if let Err(err) = result {
             self.internal_state = NetworkError(err);
         }

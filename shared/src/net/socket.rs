@@ -4,34 +4,53 @@ use std::time::Instant;
 use std::time::Duration;
 use std::marker::PhantomData;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::hash::Hash;
 
 use net::MAX_MESSAGE_LENGTH;
 use net::Packable;
 use net::Message;
 
-pub trait RecvQueueWrapper {
-    fn recv_queue(&mut self) -> Option<&mut RecvQueue>;
+pub trait RecvQueueWrapper<RecvType> {
+    fn recv_queue(&mut self) -> Option<&mut RecvQueue<RecvType>>;
 }
 
-pub struct RecvQueue {
-    // TODO
+pub struct RecvQueue<RecvType> {
+    messages: HashMap<u64, RecvType>,
+    oldest_id: u64,
 }
 
-pub struct SendQueue {
-    // TODO
+impl<RecvType> RecvQueue<RecvType> {
+    pub fn new() -> Self {
+        RecvQueue {
+            messages: HashMap::new(),
+            oldest_id: 0,
+        }
+    }
 }
 
-pub trait RecvQueueProvider<AddrType> {
-    fn recv_queue(&mut self, addr: AddrType) -> Option<&mut RecvQueue>;
+pub struct SendQueue<SendType> {
+    messages: VecDeque<(u64, SendType)>,
 }
 
-impl<AddrType, T> RecvQueueProvider<AddrType> for HashMap<AddrType, T>
+impl<SendType> SendQueue<SendType> {
+    pub fn new() -> Self {
+        SendQueue {
+            messages: VecDeque::new(),
+        }
+    }
+}
+
+pub trait RecvQueueProvider<AddrType, RecvType> {
+    fn recv_queue(&mut self, addr: AddrType) -> Option<&mut RecvQueue<RecvType>>;
+}
+
+impl<AddrType, RecvType, T> RecvQueueProvider<AddrType, RecvType> for HashMap<AddrType, T>
 where
     AddrType: Eq + Hash,
-    T: RecvQueueWrapper
+    T: RecvQueueWrapper<RecvType>
 {
-    fn recv_queue(&mut self, addr: AddrType) -> Option<&mut RecvQueue> {
+    fn recv_queue(&mut self, addr: AddrType) -> Option<&mut RecvQueue<RecvType>> {
         self.get_mut(&addr).and_then(|wrapper| wrapper.recv_queue())
     }
 }
@@ -81,7 +100,8 @@ impl<
         self.send_to(SocketMessage::Conless(msg), addr)
     }
 
-    pub fn send_to_reliable(&self, msg: SendType::Reliable, addr: AddrType) -> io::Result<()> {
+    pub fn send_to_reliable(&self, msg: SendType::Reliable, addr: AddrType,
+                            send_queue: &mut SendQueue<SendType>) -> io::Result<()> {
         let msg_id = 0; // TODO
         self.send_to(SocketMessage::Reliable(msg, msg_id), addr)
     }
@@ -90,11 +110,17 @@ impl<
         self.send_to(SocketMessage::Unreliable(msg), addr)
     }
 
-    pub fn broadcast_reliable<I>(&self, msg: SendType::Reliable, addrs: I) -> io::Result<()>
-    where I: Iterator<Item = AddrType> {
-        for addr in addrs {
-            // TODO
-            self.send_to_reliable(msg.clone(), addr)?;
+    pub fn broadcast_reliable<'a, I>(
+        &self,
+        msg: SendType::Reliable,
+        send_queues: I
+    ) -> io::Result<()>
+    where
+        I: Iterator<Item = (&'a AddrType, &'a mut SendQueue<SendType>)>,
+        SendType: 'a,
+    {
+        for (addr, send_queue) in send_queues {
+            self.send_to_reliable(msg.clone(), *addr, send_queue)?;
         }
         Ok(())
     }
@@ -117,7 +143,7 @@ impl<
     pub fn recv_from_until(
         &self,
         until: Instant,
-        recv_queue_provider: &mut RecvQueueProvider<AddrType>
+        recv_queue_provider: &mut RecvQueueProvider<AddrType, RecvType>
     ) -> io::Result<Option<(RecvType, AddrType)>> {
         // first make sure we read a message if there are any
         self.wrapped_udp_socket.set_nonblocking(true).unwrap();
@@ -139,7 +165,7 @@ impl<
 
     // reads messages until there is a valid one or an error occurs
     // time out errors are transformed into None
-    fn recv_from(&self, recv_queue_provider: &mut RecvQueueProvider<AddrType>)
+    fn recv_from(&self, recv_queue_provider: &mut RecvQueueProvider<AddrType, RecvType>)
     -> io::Result<Option<(RecvType, AddrType)>> {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         loop {

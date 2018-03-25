@@ -18,6 +18,7 @@ use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::tick_time::TickInstant;
 use shared::net::socket::RecvQueueWrapper;
+use shared::net::socket::SendQueue;
 use shared::net::socket::RecvQueue;
 use shared::net::socket::ReliableSocket;
 use shared::net::ClientMessage;
@@ -33,8 +34,8 @@ use shared::net::ConnectionCloseReason;
 
 use socket::WrappedServerUdpSocket;
 
-impl RecvQueueWrapper for Client {
-    fn recv_queue(&mut self) -> Option<&mut RecvQueue> {
+impl RecvQueueWrapper<ClientMessage> for Client {
+    fn recv_queue(&mut self) -> Option<&mut RecvQueue<ClientMessage>> {
         Some(&mut self.recv_queue)
     }
 }
@@ -43,7 +44,8 @@ struct Client {
     player_id: u64,
     inputs: HashMap<u64, CharacterInput>,
     last_msg_time: Instant,
-    recv_queue: RecvQueue,
+    send_queue: SendQueue<ServerMessage>,
+    recv_queue: RecvQueue<ClientMessage>,
 }
 
 pub struct Server {
@@ -130,10 +132,10 @@ impl Server {
 
     fn remove_clients(&mut self) {
         for (addr, reason) in self.to_remove_clients.drain() {
-            let client = self.clients.remove(&addr).unwrap();
+            let mut client = self.clients.remove(&addr).unwrap();
             let _name = self.model.remove_player(client.player_id).unwrap().take_name(); // TODO for leave message
             let msg = ConnectionClose(reason);
-            self.socket.send_to_reliable(msg, addr).unwrap(); // TODO remove unwrap
+            self.socket.send_to_reliable(msg, addr, &mut client.send_queue).unwrap(); // TODO remove unwrap
             // TODO broadcast leave message
         }
     }
@@ -178,7 +180,8 @@ impl Server {
                             player_id,
                             inputs: HashMap::new(),
                             last_msg_time: recv_time,
-                            recv_queue: RecvQueue {},
+                            send_queue: SendQueue::new(),
+                            recv_queue: RecvQueue::new(),
                         });
                         self.socket.send_to_conless(ConnectionConfirm(player_id), addr).unwrap(); // TODO remove unwrap
                     },
