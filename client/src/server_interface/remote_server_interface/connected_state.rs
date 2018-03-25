@@ -1,3 +1,4 @@
+use std::io;
 use std::time::Instant;
 use std::time::Duration;
 use std::collections::HashMap;
@@ -10,9 +11,11 @@ use shared::tick_time::TickRate;
 use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
-use shared::net::ConServerMessage;
-use shared::net::ConServerMessage::*;
-use shared::net::ConClientMessage::*;
+use shared::net::ReliableServerMessage;
+use shared::net::ReliableServerMessage::*;
+use shared::net::UnreliableServerMessage;
+use shared::net::UnreliableServerMessage::*;
+use shared::net::UnreliableClientMessage::*;
 use shared::net::Snapshot;
 use shared::consts;
 use shared::consts::TICK_SPEED;
@@ -23,7 +26,7 @@ use shared::consts::INPUT_ARRIVAL_SIGMA_FACTOR;
 use shared::util;
 use shared::util::Mix;
 
-use server_interface::remote_server_interface::socket::ClientSocket;
+use server_interface::remote_server_interface::ClientSocket;
 use server_interface::ConnectionState;
 
 struct OnlineDistribution<T> where T:
@@ -189,7 +192,8 @@ impl AfterSnapshotData {
         self.next_tick_time = self.tick_time + 1 / tick_rate;
     }
 
-    fn send_and_save_input(&mut self, socket: &ClientSocket, character_input: CharacterInput) {
+    fn send_and_save_input(&mut self, socket: &ClientSocket,
+                           character_input: CharacterInput) -> io::Result<()> {
         self.predicted_tick += 1;
         let send_time = Instant::now();
         // we add a multiple of the standard deviation of the input arrival time distribution
@@ -211,9 +215,10 @@ impl AfterSnapshotData {
             tick: self.predicted_tick,
             input: character_input
         };
-        socket.send_connected(msg);
+        socket.send_to_unreliable(msg, ())?;
         self.sent_input_times.insert(self.predicted_tick, Instant::now());
         self.sent_inputs.insert(self.predicted_tick, character_input);
+        Ok(())
     }
 
     fn remove_old_snapshots_and_inputs(&mut self) {
@@ -284,13 +289,15 @@ impl ConnectedState {
         }
     }
 
-    pub fn do_tick(&mut self, network: &ClientSocket, character_input: CharacterInput) {
+    pub fn do_tick(&mut self, network: &ClientSocket,
+                   character_input: CharacterInput) -> io::Result<()> {
         if let Some(ref mut data) = self.after_snapshot_data {
             data.update_tick();
-            data.send_and_save_input(network, character_input);
+            data.send_and_save_input(network, character_input)?;
             data.remove_old_snapshots_and_inputs();
             data.update_model(self.my_player_id);
         }
+        Ok(())
     }
 
     pub fn next_tick_time(&self) -> Option<Instant> {
@@ -316,7 +323,7 @@ impl ConnectedState {
         }
     }
 
-    pub fn handle_message(&mut self, msg: ConServerMessage) {
+    pub fn handle_unreliable_message(&mut self, msg: UnreliableServerMessage) {
         let recv_time = Instant::now();
         match msg {
             SnapshotMessage(snapshot) => match self.after_snapshot_data {
@@ -330,7 +337,12 @@ impl ConnectedState {
                     data.on_input_ack(input_tick, arrival_tick_instant);
                 }
             }
-            ConnectionClose(_) => (), // handled earlier
+        }
+    }
+
+    pub fn handle_reliable_message(&mut self, msg: ReliableServerMessage) {
+        match msg {
+            ConnectionClose(_) => (), // should be handled before
         }
     }
 }

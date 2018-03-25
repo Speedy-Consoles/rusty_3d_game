@@ -102,16 +102,18 @@ impl Client {
             self.handle_controls();
 
             // tick
-            let before_tick = Instant::now();
-            if self.server_interface.next_tick_time().map_or(false, |t| before_tick >= t) {
-                let mut character_input = self.character_input;
-                if self.menu.active() {
-                    character_input = Default::default();
-                    character_input.view_dir = self.character_input.view_dir;
+            if let Some(next_tick_time) = self.server_interface.next_tick_time() {
+                let before_tick = Instant::now();
+                if next_tick_time <= before_tick {
+                    let mut character_input = self.character_input;
+                    if self.menu.active() {
+                        character_input = Default::default();
+                        character_input.view_dir = self.character_input.view_dir;
+                    }
+                    self.server_interface.do_tick(character_input);
+                    self.character_input.reset_flags();
+                    tick_counter += 1;
                 }
-                self.server_interface.do_tick(character_input);
-                self.character_input.reset_flags();
-                tick_counter += 1;
             }
 
             self.update_cursor();
@@ -156,6 +158,12 @@ impl Client {
                 .unwrap_or(min_loop_rate_time).min(next_draw_time);
             self.server_interface.handle_traffic(next_loop_time);
 
+            /*println!("{:?}", match self.server_interface.connection_state() {
+                Connecting => "Connecting",
+                Connected { .. } => "Connected",
+                Disconnecting => "Disconnecting",
+                Disconnected(_) => "Disconnected",
+            });*/
             // handle closing request
             if self.closing {
                 // wait for disconnect before closing

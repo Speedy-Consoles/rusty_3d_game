@@ -8,43 +8,63 @@ use std::thread;
 use std::time::Instant;
 use std::collections::HashMap;
 use std::io;
+use std::net::SocketAddr;
+
+use net2::UdpBuilder;
 
 use shared::consts;
 use shared::consts::TICK_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::tick_time::TickInstant;
-use shared::net::socket::Socket;
-use shared::net::ConClientMessage::*;
-use shared::net::ConLessClientMessage::*;
-use shared::net::ConServerMessage::*;
-use shared::net::ConLessServerMessage::*;
+use shared::net::socket::RecvQueueWrapper;
+use shared::net::socket::RecvQueue;
+use shared::net::socket::ReliableSocket;
+use shared::net::ClientMessage;
+use shared::net::ConlessClientMessage::*;
+use shared::net::ReliableClientMessage::*;
+use shared::net::UnreliableClientMessage::*;
+use shared::net::ServerMessage;
+use shared::net::ConlessServerMessage::*;
+use shared::net::ReliableServerMessage::*;
+use shared::net::UnreliableServerMessage::*;
 use shared::net::Snapshot;
 use shared::net::ConnectionCloseReason;
 
-use socket::ServerSocket;
-use socket::CheckedClientMessage;
+use socket::WrappedServerUdpSocket;
+
+impl RecvQueueWrapper for Client {
+    fn recv_queue(&mut self) -> Option<&mut RecvQueue> {
+        Some(&mut self.recv_queue)
+    }
+}
 
 struct Client {
+    player_id: u64,
     inputs: HashMap<u64, CharacterInput>,
     last_msg_time: Instant,
+    recv_queue: RecvQueue,
 }
 
 pub struct Server {
-    socket: ServerSocket,
+    socket: ReliableSocket<ServerMessage, ClientMessage, SocketAddr, WrappedServerUdpSocket>,
     model: Model,
     tick: u64,
     tick_time: Instant,
     next_tick_time: Instant,
-    clients: HashMap<u64, Client>,
-    to_remove_clients: HashMap<u64, ConnectionCloseReason>,
+    clients: HashMap<SocketAddr, Client>,
+    to_remove_clients: HashMap<SocketAddr, ConnectionCloseReason>,
     closing: bool,
 }
 
 impl Server {
     pub fn new() -> io::Result<Server> {
+        // create IPv6 UDP socket with IPv4 compatibility
+        let wrapped_socket = WrappedServerUdpSocket {
+            udp_socket: UdpBuilder::new_v6()?.only_v6(false)?.bind(("::", 51946))?,
+        };
         Ok(Server {
-            socket: ServerSocket::new(51946)?,
+            socket: ReliableSocket::new(wrapped_socket),
             model: Model::new(),
             tick: 0,
             tick_time: Instant::now(),
@@ -75,14 +95,14 @@ impl Server {
             self.remove_clients();
 
             // tick
-            for (id, client) in self.clients.iter_mut() {
+            for (_, client) in self.clients.iter_mut() {
                 if let Some(input) = client.inputs.remove(&self.tick) {
-                    self.model.set_character_input(*id, input);
+                    self.model.set_character_input(client.player_id, input);
                 }
             }
             self.model.do_tick();
             let msg = SnapshotMessage(Snapshot::new(self.tick, &self.model));
-            self.socket.broadcast(msg);
+            self.socket.broadcast_unreliable(msg, self.clients.keys()).unwrap(); // TODO remove unwrap
             tick_counter += 1;
 
             // display tick rate
@@ -109,21 +129,25 @@ impl Server {
     }
 
     fn remove_clients(&mut self) {
-        // TODO find a way to move the reason instead of copying it
-        for (id, reason) in self.to_remove_clients.drain() {
-            let _name = self.model.remove_player(id).unwrap().take_name(); // TODO for leave message
-            self.clients.remove(&id);
+        for (addr, reason) in self.to_remove_clients.drain() {
+            let client = self.clients.remove(&addr).unwrap();
+            let _name = self.model.remove_player(client.player_id).unwrap().take_name(); // TODO for leave message
             let msg = ConnectionClose(reason);
-            self.socket.send_to_connected(msg, id);
-            self.socket.remove_client(id);
+            self.socket.send_to_reliable(msg, addr).unwrap(); // TODO remove unwrap
             // TODO broadcast leave message
         }
     }
 
     fn handle_traffic(&mut self) {
         loop {
-            match self.socket.recv_from_until(self.next_tick_time) {
-                Ok(Some(msg)) => self.handle_message(msg),
+            match {
+                let clients = &mut self.clients;
+                self.socket.recv_from_until(
+                    self.next_tick_time,
+                    clients,
+                )
+            } {
+                Ok(Some((msg, addr))) => self.handle_message(msg, addr),
                 Ok(None) => break,
                 Err(e) => {
                     println!("ERROR: Network broken: {:?}", e);
@@ -139,36 +163,41 @@ impl Server {
         }
     }
 
-    fn handle_message(&mut self, message: CheckedClientMessage) {
+    fn handle_message(&mut self, message: ClientMessage, addr: SocketAddr) {
         let recv_time = Instant::now();
         match message {
-            CheckedClientMessage::Connected(msg, addr) => {
+            ClientMessage::Conless(msg) => {
                 match msg {
                     ConnectionRequest => {
-                        if let Some(_id) = self.socket.client_id_by_addr(addr) {
+                        if let Some(client) = self.clients.get(&addr) {
                             // TODO send another connection confirm to client and reset their connection meta data
-                        } else {
-                            let new_id = self.model.add_player(String::from("UnknownPlayer"));
-                            self.clients.insert(new_id, Client {
-                                inputs: HashMap::new(),
-                                last_msg_time: recv_time,
-                            });
-                            self.socket.add_client(new_id, addr);
-                            self.socket.send_to_connectionless(
-                                ConnectionConfirm(new_id),
-                                addr,
-                            );
+                            return;
                         }
+                        let player_id = self.model.add_player(String::from("UnknownPlayer"));
+                        self.clients.insert(addr, Client {
+                            player_id,
+                            inputs: HashMap::new(),
+                            last_msg_time: recv_time,
+                            recv_queue: RecvQueue {},
+                        });
+                        self.socket.send_to_conless(ConnectionConfirm(player_id), addr).unwrap(); // TODO remove unwrap
                     },
                 }
             },
-            CheckedClientMessage::Connectionless(msg, id) => {
-                self.clients.get_mut(&id).unwrap().last_msg_time = recv_time;
+            ClientMessage::Reliable(msg) => {
+                match msg {
+                    DisconnectRequest => {
+                        self.to_remove_clients.insert(addr, ConnectionCloseReason::UserDisconnect);
+                    },
+                }
+            },
+            ClientMessage::Unreliable(msg) => {
+                let client = self.clients.get_mut(&addr).unwrap();
+                client.last_msg_time = recv_time;
                 match msg {
                     InputMessage { tick, input } => {
-                        let client = self.clients.get_mut(&id).unwrap();
                         if tick > self.tick {
-                            self.socket.send_to_connected(
+                            self.socket.send_to_unreliable(
                                 InputAck {
                                     input_tick: tick,
                                     arrival_tick_instant: TickInstant::from_interval(
@@ -178,8 +207,8 @@ impl Server {
                                         recv_time,
                                     )
                                 },
-                                id,
-                            );
+                                addr,
+                            ).unwrap(); // TODO remove unwrap
                             // TODO ignore insanely high ticks
                             client.inputs.insert(tick, input);
                         } else {
@@ -189,9 +218,6 @@ impl Server {
                                 tick,
                             );
                         }
-                    },
-                    DisconnectRequest => {
-                        self.to_remove_clients.insert(id, ConnectionCloseReason::UserDisconnect);
                     },
                 }
             }

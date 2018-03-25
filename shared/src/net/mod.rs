@@ -14,7 +14,6 @@ use tick_time::TickInstant;
 use model::Model;
 use model::world::character::CharacterInput;
 
-
 pub const MAX_MESSAGE_LENGTH: usize = 1024;
 
 pub trait Packable: Sized {
@@ -34,24 +33,58 @@ impl<T: Serialize + DeserializeOwned> Packable for T {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+pub trait Message: Sized {
+    type Conless: Serialize + DeserializeOwned + Into<Self>;
+    type Reliable: Serialize + DeserializeOwned + Into<Self> + Clone; // TODO maybe remove clone?
+    type Unreliable: Serialize + DeserializeOwned + Into<Self> + Clone;
+}
+
 pub enum ClientMessage {
-    Connected(ConClientMessage),
-    Connectionless(ConLessClientMessage),
+    Conless(ConlessClientMessage),
+    Reliable(ReliableClientMessage),
+    Unreliable(UnreliableClientMessage),
+}
+
+impl Message for ClientMessage {
+    type Conless = ConlessClientMessage;
+    type Reliable = ReliableClientMessage;
+    type Unreliable = UnreliableClientMessage;
+}
+
+impl From<ConlessClientMessage> for ClientMessage {
+    fn from(msg: ConlessClientMessage) -> Self {
+        ClientMessage::Conless(msg)
+    }
+}
+
+impl From<ReliableClientMessage> for ClientMessage {
+    fn from(msg: ReliableClientMessage) -> Self {
+        ClientMessage::Reliable(msg)
+    }
+}
+
+impl From<UnreliableClientMessage> for ClientMessage {
+    fn from(msg: UnreliableClientMessage) -> Self {
+        ClientMessage::Unreliable(msg)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum ConClientMessage {
-    DisconnectRequest,
-    InputMessage { tick: u64, input: CharacterInput, },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum ConLessClientMessage {
+pub enum ConlessClientMessage {
     ConnectionRequest,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReliableClientMessage {
+    DisconnectRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UnreliableClientMessage {
+    InputMessage { tick: u64, input: CharacterInput, },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     tick: u64,
     model: Model
@@ -90,20 +123,48 @@ impl PartialOrd for Snapshot {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
-    Connected(ConServerMessage),
-    Connectionless(ConLessServerMessage),
+    Conless(ConlessServerMessage),
+    Reliable(ReliableServerMessage),
+    Unreliable(UnreliableServerMessage),
+}
+
+impl Message for ServerMessage {
+    type Conless = ConlessServerMessage;
+    type Reliable = ReliableServerMessage;
+    type Unreliable = UnreliableServerMessage;
+}
+
+impl From<ConlessServerMessage> for ServerMessage {
+    fn from(msg: ConlessServerMessage) -> Self {
+        ServerMessage::Conless(msg)
+    }
+}
+
+impl From<ReliableServerMessage> for ServerMessage {
+    fn from(msg: ReliableServerMessage) -> Self {
+        ServerMessage::Reliable(msg)
+    }
+}
+
+impl From<UnreliableServerMessage> for ServerMessage {
+    fn from(msg: UnreliableServerMessage) -> Self {
+        ServerMessage::Unreliable(msg)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum ConLessServerMessage {
+pub enum ConlessServerMessage {
     ConnectionConfirm(u64),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum ConServerMessage {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReliableServerMessage {
     ConnectionClose(ConnectionCloseReason),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UnreliableServerMessage {
     SnapshotMessage(Snapshot),
     InputAck {
         input_tick: u64,
@@ -111,7 +172,7 @@ pub enum ConServerMessage {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConnectionCloseReason {
     UserDisconnect,
     TimedOut,
