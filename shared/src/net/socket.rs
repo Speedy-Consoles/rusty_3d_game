@@ -6,52 +6,78 @@ use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::hash::Hash;
+use std::iter;
+
+use arrayvec::ArrayVec;
 
 use net::MAX_MESSAGE_LENGTH;
 use net::Packable;
 use net::Message;
+use consts;
+use consts::MAX_UNACKED_MESSAGES;
 
-pub trait RecvQueueWrapper<RecvType> {
-    fn recv_queue(&mut self) -> Option<&mut RecvQueue<RecvType>>;
+struct SentMessage {
+    id: u64,
+    data: ArrayVec<[u8; MAX_MESSAGE_LENGTH]>,
 }
 
-pub struct RecvQueue<RecvType> {
-    messages: HashMap<u64, RecvType>,
-    oldest_id: u64,
+pub struct ConnectionData {
+    sent_messages: VecDeque<SentMessage>, // TODO use byte buffer instead
+    next_msg_id: u64,
+    ack: u64,
+    resend: bool,
+    send_message_dropped: bool,
+    last_ack: Instant,
 }
 
-impl<RecvType> RecvQueue<RecvType> {
-    pub fn new() -> Self {
-        RecvQueue {
-            messages: HashMap::new(),
-            oldest_id: 0,
+impl ConnectionData {
+    pub fn new() -> ConnectionData {
+        ConnectionData {
+            sent_messages: VecDeque::new(),
+            next_msg_id: 0,
+            ack: 0,
+            resend: false,
+            send_message_dropped: false,
+            last_ack: Instant::now(),
         }
+    }
+
+    pub fn timed_out(&self) -> bool {
+        self.send_message_dropped || Instant::now() - self.last_ack > consts::ack_timeout()
     }
 }
 
-pub struct SendQueue<SendType> {
-    messages: VecDeque<(u64, SendType)>,
+pub trait ConnectionDataWrapper {
+    fn con_data(&self) -> &ConnectionData;
+    fn con_data_mut(&mut self) -> &mut ConnectionData;
 }
 
-impl<SendType> SendQueue<SendType> {
-    pub fn new() -> Self {
-        SendQueue {
-            messages: VecDeque::new(),
-        }
+impl ConnectionDataWrapper for ConnectionData {
+    fn con_data(&self) -> &ConnectionData {
+        self
+    }
+    fn con_data_mut(&mut self) -> &mut ConnectionData {
+        self
     }
 }
 
-pub trait RecvQueueProvider<AddrType, RecvType> {
-    fn recv_queue(&mut self, addr: AddrType) -> Option<&mut RecvQueue<RecvType>>;
+pub trait ConnectionDataProvider<AddrType> {
+    fn con_data_mut(&mut self, addr: AddrType) -> Option<&mut ConnectionData>;
 }
 
-impl<AddrType, RecvType, T> RecvQueueProvider<AddrType, RecvType> for HashMap<AddrType, T>
-where
-    AddrType: Eq + Hash,
-    T: RecvQueueWrapper<RecvType>
+impl<T: ConnectionDataWrapper> ConnectionDataProvider<()> for T {
+    fn con_data_mut(&mut self, _addr: ()) -> Option<&mut ConnectionData> {
+        Some(self.con_data_mut())
+    }
+}
+
+impl<AddrType, T> ConnectionDataProvider<AddrType> for HashMap<AddrType, T>
+    where
+        AddrType: Eq + Hash,
+        T: ConnectionDataWrapper
 {
-    fn recv_queue(&mut self, addr: AddrType) -> Option<&mut RecvQueue<RecvType>> {
-        self.get_mut(&addr).and_then(|wrapper| wrapper.recv_queue())
+    fn con_data_mut(&mut self, addr: AddrType) -> Option<&mut ConnectionData> {
+        self.get_mut(&addr).map(|wrapper| wrapper.con_data_mut())
     }
 }
 
@@ -63,10 +89,20 @@ pub trait WrappedUdpSocket<AddrType>: Sized {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-enum SocketMessage<T: Message> {
-    Conless(T::Conless),
-    Reliable(T::Reliable, u64),
-    Unreliable(T::Unreliable),
+enum MessageHeader {
+    Conless,
+    Conful {
+        ack: u64,
+        resend: bool,
+        conful_header: ConfulHeader,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum ConfulHeader {
+    Reliable(u64),
+    Unreliable,
+    Ack,
 }
 
 pub struct ReliableSocket<
@@ -97,95 +133,198 @@ impl<
     }
 
     pub fn send_to_conless(&self, msg: SendType::Conless, addr: AddrType) -> io::Result<()> {
-        self.send_to(SocketMessage::Conless(msg), addr)
+        let mut buf = [0; MAX_MESSAGE_LENGTH];
+        let header = MessageHeader::Conless;
+        let header_size = header.pack(&mut buf).unwrap();
+        let payload_size = msg.pack(&mut buf[header_size..]).unwrap();
+        let msg_size = header_size + payload_size;
+        self.wrapped_udp_socket.send_to(&buf[..msg_size], addr)?;
+        Ok(())
     }
 
     pub fn send_to_reliable(&self, msg: SendType::Reliable, addr: AddrType,
-                            send_queue: &mut SendQueue<SendType>) -> io::Result<()> {
-        let msg_id = 0; // TODO
-        self.send_to(SocketMessage::Reliable(msg, msg_id), addr)
-    }
-
-    pub fn send_to_unreliable(&self, msg: SendType::Unreliable, addr: AddrType) -> io::Result<()> {
-        self.send_to(SocketMessage::Unreliable(msg), addr)
-    }
-
-    pub fn broadcast_reliable<'a, I>(
-        &self,
-        msg: SendType::Reliable,
-        send_queues: I
-    ) -> io::Result<()>
-    where
-        I: Iterator<Item = (&'a AddrType, &'a mut SendQueue<SendType>)>,
-        SendType: 'a,
-    {
-        for (addr, send_queue) in send_queues {
-            self.send_to_reliable(msg.clone(), *addr, send_queue)?;
+                            con_data: &mut ConnectionData) -> io::Result<()> {
+        if con_data.sent_messages.len() >= MAX_UNACKED_MESSAGES {
+            con_data.send_message_dropped = true;
+            println!("DEBUG: Maximum number of unacked messages reached!");
+            return Ok(());
         }
-        Ok(())
-    }
 
-    pub fn broadcast_unreliable<'a, I>(&self, msg: SendType::Unreliable, addrs: I) -> io::Result<()>
-    where I: Iterator<Item = &'a AddrType> {
-        for addr in addrs {
-            self.send_to_unreliable(msg.clone(), *addr)?;
-        }
-        Ok(())
-    }
+        let id = con_data.next_msg_id;
+        con_data.next_msg_id += 1;
 
-    fn send_to(&self, msg: SocketMessage<SendType>, addr: AddrType) -> io::Result<()> {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
-        let amount = msg.pack(&mut buf).unwrap();
-        self.wrapped_udp_socket.send_to(&buf[..amount], addr)?;
+        let header = MessageHeader::Conful {
+            ack: con_data.ack,
+            resend: con_data.resend,
+            conful_header: ConfulHeader::Reliable(id),
+        };
+        con_data.resend = false;
+        let header_size = header.pack(&mut buf).unwrap();
+        let payload_size = msg.pack(&mut buf[header_size..]).unwrap();
+        let msg_size = header_size + payload_size;
+        self.wrapped_udp_socket.send_to(&buf[..msg_size], addr)?;
+
+        let mut data: ArrayVec<[u8; MAX_MESSAGE_LENGTH]> = iter::repeat(0).collect();
+        data.truncate(payload_size);
+        data.copy_from_slice(&buf[header_size..msg_size]);
+        con_data.sent_messages.push_back(SentMessage { id, data });
+
+        Ok(())
+    }
+
+    pub fn send_to_unreliable(&self, msg: SendType::Unreliable,
+                              addr: AddrType, con_data: &mut ConnectionData) -> io::Result<()> {
+        let mut buf = [0; MAX_MESSAGE_LENGTH];
+        let header = MessageHeader::Conful {
+            ack: con_data.ack,
+            resend: con_data.resend,
+            conful_header: ConfulHeader::Unreliable,
+        };
+        con_data.resend = false;
+        let header_size = header.pack(&mut buf).unwrap();
+        let payload_size = msg.pack(&mut buf[header_size..]).unwrap();
+        let msg_size = header_size + payload_size;
+        self.wrapped_udp_socket.send_to(&buf[..msg_size], addr)?;
+
+        Ok(())
+    }
+
+    pub fn broadcast_reliable<'a, I, T>(&self, msg: SendType::Reliable,
+                                        host_infos: I) -> io::Result<()>
+    where
+        I: Iterator<Item = (&'a AddrType, &'a mut T)>,
+        T: ConnectionDataWrapper + 'a,
+    {
+        for (addr, wrapper) in host_infos {
+            self.send_to_reliable(msg.clone(), *addr, wrapper.con_data_mut())?;
+        }
+        Ok(())
+    }
+
+    pub fn broadcast_unreliable<'a, I, T>(&self, msg: SendType::Unreliable,
+                                       host_infos: I) -> io::Result<()>
+    where
+        I: Iterator<Item = (&'a AddrType, &'a mut T)>,
+        T: ConnectionDataWrapper + 'a,
+    {
+        for (addr, wrapper) in host_infos {
+            self.send_to_unreliable(msg.clone(), *addr, wrapper.con_data_mut())?;
+        }
         Ok(())
     }
 
     pub fn recv_from_until(
         &self,
         until: Instant,
-        recv_queue_provider: &mut RecvQueueProvider<AddrType, RecvType>
+        con_data_provider: &mut ConnectionDataProvider<AddrType>,
+        disc_con_data_provider: &mut ConnectionDataProvider<AddrType>, // TODO allow removing of data
     ) -> io::Result<Option<(RecvType, AddrType)>> {
         // first make sure we read a message if there are any
         self.wrapped_udp_socket.set_nonblocking(true).unwrap();
-        let result = self.recv_from(recv_queue_provider);
+        let result = self.recv_from(None, con_data_provider, disc_con_data_provider);
         self.wrapped_udp_socket.set_nonblocking(false).unwrap();
         let mut option = result?;
 
         // if there was no message, wait for one until time out
         if option.is_none() {
-            let now = Instant::now();
-            if until <= now {
-                return Ok(None);
-            }
-            self.wrapped_udp_socket.set_read_timeout(Some(until - now)).unwrap();
-            option = self.recv_from(recv_queue_provider)?;
+            option = self.recv_from(Some(until), con_data_provider, disc_con_data_provider)?;
         }
         Ok(option)
     }
 
     // reads messages until there is a valid one or an error occurs
     // time out errors are transformed into None
-    fn recv_from(&self, recv_queue_provider: &mut RecvQueueProvider<AddrType, RecvType>)
-    -> io::Result<Option<(RecvType, AddrType)>> {
+    fn recv_from(
+        &self,
+        until: Option<Instant>,
+        con_data_provider: &mut ConnectionDataProvider<AddrType>,
+        disc_con_data_provider: &mut ConnectionDataProvider<AddrType>, // TODO allow removing of data
+    ) -> io::Result<Option<(RecvType, AddrType)>> {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         loop {
+            if let Some(until) = until {
+                let now = Instant::now();
+                if until <= now {
+                    return Ok(None);
+                }
+                self.wrapped_udp_socket.set_read_timeout(Some(until - now)).unwrap();
+            }
             match self.wrapped_udp_socket.recv_from(&mut buf) {
                 Ok((amount, addr)) => {
-                    match SocketMessage::<RecvType>::unpack(&buf[..amount]) {
-                        Ok(socket_msg) => {
-                            if let SocketMessage::Conless(msg) = socket_msg {
-                                return Ok(Some((msg.into(), addr)));
-                            } else if let Some(queue) = recv_queue_provider.recv_queue(addr) {
-                                return Ok(Some((match socket_msg {
-                                    SocketMessage::Reliable(msg, _msg_id) => {
-                                        // TODO
-                                        msg.into()
-                                    },
-                                    SocketMessage::Unreliable(msg) => msg.into(),
-                                    _ => unreachable!(),
-                                }, addr)));
+                    match MessageHeader::unpack(&buf[..amount]) {
+                        Ok(header) => {
+                            let header_size = header.packed_size().unwrap() as usize; // TODO isn't this constant?
+                            let payload_slice = &buf[header_size..amount];
+                            match header {
+                                MessageHeader::Conless => {
+                                    match RecvType::Conless::unpack(payload_slice) {
+                                        Ok(msg) => return Ok(Some((msg.into(), addr))),
+                                        Err(e) => println!(
+                                            "DEBUG: Received malformed message.\
+                                                     Unpack error: {:?}",
+                                            e,
+                                        ),
+                                    }
+                                },
+                                MessageHeader::Conful {
+                                    ack: their_ack,
+                                    resend: their_resend,
+                                    conful_header
+                                } => {
+                                    if let Some(con_data) = con_data_provider.con_data_mut(addr) {
+                                        self.on_ack(addr, con_data, their_ack, their_resend)?;
+                                        match conful_header {
+                                            ConfulHeader::Reliable(id) => {
+                                                if id == con_data.ack {
+                                                    match RecvType::Reliable
+                                                            ::unpack(payload_slice) {
+                                                        Ok(msg) => {
+                                                            con_data.ack += 1;
+                                                            println!(
+                                                                "DEBUG: Received reliable message!"
+                                                            );
+                                                            return Ok(Some((msg.into(), addr)));
+                                                        }
+                                                        Err(e) => println!(
+                                                            "DEBUG: Received malformed message.\
+                                                             Unpack error: {:?}",
+                                                            e,
+                                                        ),
+                                                    }
+                                                } else if id > con_data.ack {
+                                                    con_data.resend = true;
+                                                    println!("DEBUG: Received early packet!");
+                                                } else {
+                                                    println!("DEBUG: Received late packet!");
+                                                }
+                                            },
+                                            ConfulHeader::Unreliable => {
+                                                match RecvType::Unreliable::unpack(payload_slice) {
+                                                    Ok(msg) => return Ok(Some((msg.into(), addr))),
+                                                    Err(e) => println!(
+                                                        "DEBUG: Received malformed message. \
+                                                         Unpack error: {:?}",
+                                                        e,
+                                                    ),
+                                                }
+                                            },
+                                            ConfulHeader::Ack => (),
+                                        }
+                                    } else if let Some(con_data)
+                                            = disc_con_data_provider.con_data_mut(addr) {
+                                        self.on_ack(addr, con_data, their_ack, their_resend)?;
+                                        match conful_header {
+                                            ConfulHeader::Ack => (),
+                                            _ => println!("DEBUG: Received connectionful message \
+                                                           from disconnecting host!"),
+                                        }
+                                    } else {
+                                        println!("DEBUG: Received connectionful message \
+                                                  from unknown host!");
+                                    }
+                                },
                             }
-                            println!("DEBUG: Received connectionful message from unknown host!");
                         },
                         Err(e) => println!(
                             "DEBUG: Received malformed message. Unpack error: {:?}",
@@ -201,5 +340,42 @@ impl<
                 }
             }
         }
+    }
+
+    fn on_ack(&self, addr: AddrType, con_data: &mut ConnectionData,
+              ack: u64, resend: bool) -> io::Result<()>{
+        con_data.last_ack = Instant::now();
+
+        // first, remove all acked messages
+        loop {
+            if let Some(sent_msg) = con_data.sent_messages.front() {
+                if sent_msg.id >= ack {
+                    break;
+                }
+            } else {
+                break;
+            }
+            con_data.sent_messages.pop_front().unwrap();
+        }
+
+        // then resend all not acked messages, if requested
+        if resend {
+            // TODO can this get inperformant?
+            for sent_message in con_data.sent_messages.iter() {
+                let mut buf = [0; MAX_MESSAGE_LENGTH];
+                let header = MessageHeader::Conful {
+                    ack: con_data.ack,
+                    resend: con_data.resend,
+                    conful_header: ConfulHeader::Reliable(sent_message.id),
+                };
+                con_data.resend = false;
+                let header_size = header.pack(&mut buf).unwrap();
+                buf[header_size..].copy_from_slice(&sent_message.data);
+                let msg_size = header_size + sent_message.data.len();
+                self.wrapped_udp_socket.send_to(&buf[..msg_size], addr)?;
+            }
+        }
+
+        Ok(())
     }
 }

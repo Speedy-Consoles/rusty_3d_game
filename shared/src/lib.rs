@@ -12,6 +12,7 @@ extern crate cgmath;
 extern crate serde;
 extern crate bincode;
 #[macro_use] extern crate serde_derive;
+extern crate arrayvec;
 
 use std::fmt;
 use std::io;

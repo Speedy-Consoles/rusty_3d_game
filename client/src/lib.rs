@@ -158,12 +158,6 @@ impl Client {
                 .unwrap_or(min_loop_rate_time).min(next_draw_time);
             self.server_interface.handle_traffic(next_loop_time);
 
-            /*println!("{:?}", match self.server_interface.connection_state() {
-                Connecting => "Connecting",
-                Connected { .. } => "Connected",
-                Disconnecting => "Disconnecting",
-                Disconnected(_) => "Disconnected",
-            });*/
             // handle closing request
             if self.closing {
                 // wait for disconnect before closing

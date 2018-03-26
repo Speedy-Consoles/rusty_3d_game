@@ -4,8 +4,6 @@ use std::io::Cursor;
 use std::cmp::Ordering;
 
 use bincode;
-use bincode::serialize_into;
-use bincode::deserialize;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -19,17 +17,22 @@ pub const MAX_MESSAGE_LENGTH: usize = 1024;
 pub trait Packable: Sized {
     fn unpack(buf: &[u8]) -> bincode::Result<Self>;
     fn pack(&self, buf: &mut [u8]) -> bincode::Result<usize>;
+    fn packed_size(&self) -> bincode::Result<u64>;
 }
 
 impl<T: Serialize + DeserializeOwned> Packable for T {
     fn unpack(buf: &[u8]) -> bincode::Result<Self> {
-        deserialize(buf)
+        bincode::deserialize(buf)
     }
 
     fn pack(&self, buf: &mut [u8]) -> bincode::Result<usize> {
         let mut cursor = Cursor::new(buf);
-        serialize_into(&mut cursor, self)?;
+        bincode::serialize_into(&mut cursor, self)?;
         Ok(cursor.position() as usize)
+    }
+
+    fn packed_size(&self) -> bincode::Result<u64> {
+        bincode::serialized_size(self)
     }
 }
 
@@ -154,7 +157,7 @@ pub enum ConlessServerMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReliableServerMessage {
-    ConnectionClose(ConnectionCloseReason),
+    ConnectionClose,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,13 +167,6 @@ pub enum UnreliableServerMessage {
         input_tick: u64,
         arrival_tick_instant: TickInstant,
     },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ConnectionCloseReason {
-    UserDisconnect,
-    TimedOut,
-    Kicked,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

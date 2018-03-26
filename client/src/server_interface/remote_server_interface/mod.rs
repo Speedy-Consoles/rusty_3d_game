@@ -10,9 +10,8 @@ use std::thread;
 
 use shared::model::world::character::CharacterInput;
 use shared::consts;
-use shared::net::socket::SendQueue;
-use shared::net::socket::RecvQueue;
-use shared::net::socket::RecvQueueProvider;
+use shared::net::socket::ConnectionData;
+use shared::net::socket::ConnectionDataProvider;
 use shared::net::socket::ReliableSocket;
 use shared::net::ServerMessage;
 use shared::net::ConlessServerMessage::*;
@@ -20,15 +19,23 @@ use shared::net::ReliableServerMessage::*;
 use shared::net::ClientMessage;
 use shared::net::ConlessClientMessage::*;
 use shared::net::ReliableClientMessage::*;
-use shared::net::ConnectionCloseReason;
-use shared::net::ConnectionCloseReason::*;
 
 use super::DisconnectedReason;
 use super::ConnectionState;
 use super::ServerInterface;
 use self::connected_state::ConnectedState;
 use self::InternalState::*;
+use self::InternalDisconnectedReason::*;
 use self::socket::WrappedClientUdpSocket;
+
+enum InternalDisconnectedReason {
+    NetworkError(io::Error),
+    UserDisconnect,
+    Kicked {
+        kick_message: String,
+    },
+    TimedOut,
+}
 
 enum InternalState {
     Connecting {
@@ -36,21 +43,28 @@ enum InternalState {
     },
     Connected {
         state: ConnectedState,
-        send_queue: SendQueue<ClientMessage>,
-        recv_queue: RecvQueue<ServerMessage>,
+        con_data: ConnectionData,
     },
     Disconnecting {
-        send_queue: SendQueue<ClientMessage>,
+        con_data: ConnectionData,
         force_timeout_time: Instant,
     },
-    ConnectionClosed(ConnectionCloseReason),
-    NetworkError(io::Error),
+    Disconnected(InternalDisconnectedReason),
 }
 
-impl RecvQueueProvider<(), ServerMessage> for InternalState {
-    fn recv_queue(&mut self, _addr: ()) -> Option<&mut RecvQueue<ServerMessage>> {
+struct EmptyConnectionDataProvider {}
+
+impl ConnectionDataProvider<()> for EmptyConnectionDataProvider {
+    fn con_data_mut(&mut self, _addr: ()) -> Option<&mut ConnectionData> {
+        None
+    }
+}
+
+impl ConnectionDataProvider<()> for InternalState {
+    fn con_data_mut(&mut self, _addr: ()) -> Option<&mut ConnectionData> {
         match self {
-            &mut Connected { ref mut recv_queue, .. } => Some(recv_queue),
+            &mut Connected { ref mut con_data, .. } => Some(con_data),
+            &mut Disconnecting { ref mut con_data, .. } => Some(con_data),
             _ => None,
         }
     }
@@ -81,16 +95,17 @@ impl RemoteServerInterface {
     }
 
     fn handle_message(&mut self, message: ServerMessage) {
-        if let ServerMessage::Reliable(ConnectionClose(reason)) = message {
-            self.internal_state = ConnectionClosed(reason);
+        if let ServerMessage::Reliable(ConnectionClose) = message {
+            self.internal_state = Disconnected(Kicked {
+                kick_message: String::from("You were kicked for some reason"), // TODO replace with actual message
+            });
         } else {
             match self.internal_state {
                 Connecting { .. } => {
                     if let ServerMessage::Conless(ConnectionConfirm(my_player_id)) = message {
                         self.internal_state = Connected {
                             state: ConnectedState::new(my_player_id),
-                            send_queue: SendQueue::new(),
-                            recv_queue: RecvQueue::new(),
+                            con_data: ConnectionData::new(),
                         };
                     }
                 },
@@ -101,7 +116,7 @@ impl RemoteServerInterface {
                         ServerMessage::Unreliable(msg) => state.handle_unreliable_message(msg),
                     }
                 },
-                Disconnecting { .. } | ConnectionClosed(_) | NetworkError(_) => (),
+                Disconnecting { .. } | Disconnected(_) => (),
             }
         }
     }
@@ -115,29 +130,48 @@ impl ServerInterface for RemoteServerInterface {
                 *resend_time = Instant::now() + consts::connection_request_resend_interval();
                 result = self.socket.send_to_conless(ConnectionRequest, ());
             },
-            Connected { ref mut state, .. } => {
-                result = state.do_tick(&self.socket, character_input)
+            Connected { ref mut state, ref mut con_data } => {
+                result = state.do_tick(&self.socket, con_data, character_input)
             },
             Disconnecting { force_timeout_time, .. } => {
                 if Instant::now() > force_timeout_time {
-                    self.internal_state = ConnectionClosed(TimedOut);
+                    // TODO notify about unacked messages
+                    self.internal_state = Disconnected(UserDisconnect);
                 }
-            }
-            ConnectionClosed(_) | NetworkError(_) => (),
+            },
+            Disconnected(_) => (),
         };
         if let Err(err) = result {
-            self.internal_state = NetworkError(err);
+            self.internal_state = Disconnected(NetworkError(err));
         }
     }
 
     fn handle_traffic(&mut self, until: Instant) {
         loop {
-            match self.socket.recv_from_until(until, &mut self.internal_state) {
+            match {
+                match self.internal_state {
+                    Connected { ref mut con_data, .. } => self.socket.recv_from_until(
+                        until,
+                        con_data,
+                        &mut EmptyConnectionDataProvider {},
+                    ),
+                    Disconnecting { ref mut con_data, .. } => self.socket.recv_from_until(
+                        until,
+                        &mut EmptyConnectionDataProvider {},
+                        con_data,
+                    ),
+                    _ => self.socket.recv_from_until(
+                        until,
+                        &mut EmptyConnectionDataProvider {},
+                        &mut EmptyConnectionDataProvider {},
+                    ),
+                }
+            } {
                 Ok(Some((msg, _))) => self.handle_message(msg),
                 Ok(None) => break,
                 Err(e) => {
                     println!("ERROR: Network broken: {:?}", e);
-                    self.internal_state = NetworkError(e);
+                    self.internal_state = Disconnected(NetworkError(e));
                     let now = Instant::now();
                     if now < until {
                         thread::sleep(until - now);
@@ -154,14 +188,12 @@ impl ServerInterface for RemoteServerInterface {
             Connecting { .. } => ConnectionState::Connecting,
             Connected { ref state, .. } => state.connection_state(),
             Disconnecting { .. } => ConnectionState::Disconnecting,
-            ConnectionClosed(ref reason) => ConnectionState::Disconnected(match reason {
+            Disconnected(ref reason) => ConnectionState::Disconnected(match reason {
                 &UserDisconnect => DisconnectedReason::UserDisconnect,
-                &Kicked => DisconnectedReason::Kicked {
-                    kick_message: "You were kicked for some reason.", // TODO replace with actual message
-                },
+                &Kicked { ref kick_message } => DisconnectedReason::Kicked { kick_message },
                 &TimedOut => DisconnectedReason::TimedOut,
+                &NetworkError(_) => DisconnectedReason::NetworkError,
             }),
-            NetworkError(_) => ConnectionState::Disconnected(DisconnectedReason::NetworkError),
         }
     }
 
@@ -170,29 +202,29 @@ impl ServerInterface for RemoteServerInterface {
             Connecting { resend_time } => Some(resend_time),
             Connected { ref state, .. } => state.next_tick_time(),
             Disconnecting { force_timeout_time, .. } => Some(force_timeout_time),
-            ConnectionClosed(_) | NetworkError(_) => None,
+            Disconnected(_) => None,
         }
     }
 
     fn disconnect(&mut self) {
-        let send_queue = match self.internal_state {
-            Connecting { .. } => SendQueue::new(),
-            Connected { ref mut send_queue, .. } => {
-                mem::replace(send_queue, SendQueue::new())
+        let con_data = match self.internal_state {
+            Connecting { .. } => ConnectionData::new(),
+            Connected { ref mut con_data, .. } => {
+                mem::replace(con_data, ConnectionData::new())
             },
             _ => return,
         };
         self.internal_state = Disconnecting {
-            send_queue: send_queue,
+            con_data,
             force_timeout_time: Instant::now() + consts::disconnect_force_timeout()
         };
-        let result = if let Disconnecting { ref mut send_queue, .. } = self.internal_state {
-            self.socket.send_to_reliable(DisconnectRequest, (), send_queue)
+        let result = if let Disconnecting { ref mut con_data, .. } = self.internal_state {
+            self.socket.send_to_reliable(DisconnectRequest, (), con_data)
         } else {
             unreachable!()
         };
         if let Err(err) = result {
-            self.internal_state = NetworkError(err);
+            self.internal_state = Disconnected(NetworkError(err));
         }
     }
 }
