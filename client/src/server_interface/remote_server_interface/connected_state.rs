@@ -11,7 +11,7 @@ use shared::tick_time::TickRate;
 use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
-use shared::net::socket::ConnectionData;
+use shared::net::socket::ConId;
 use shared::net::ReliableServerMessage;
 use shared::net::ReliableServerMessage::*;
 use shared::net::UnreliableServerMessage;
@@ -193,8 +193,8 @@ impl AfterSnapshotData {
         self.next_tick_time = self.tick_time + 1 / tick_rate;
     }
 
-    fn send_and_save_input(&mut self, socket: &ClientSocket, con_data: &mut ConnectionData,
-                           character_input: CharacterInput) -> io::Result<()> {
+    fn send_and_save_input(&mut self, character_input: CharacterInput,
+                           socket: &mut ClientSocket, con_id: ConId) -> io::Result<()> {
         self.predicted_tick += 1;
         let send_time = Instant::now();
         // we add a multiple of the standard deviation of the input arrival time distribution
@@ -216,7 +216,7 @@ impl AfterSnapshotData {
             tick: self.predicted_tick,
             input: character_input
         };
-        socket.send_to_unreliable(msg, (), con_data)?;
+        socket.send_to_unreliable(con_id, msg)?;
         self.sent_input_times.insert(self.predicted_tick, Instant::now());
         self.sent_inputs.insert(self.predicted_tick, character_input);
         Ok(())
@@ -290,11 +290,11 @@ impl ConnectedState {
         }
     }
 
-    pub fn do_tick(&mut self, network: &ClientSocket, con_data: &mut ConnectionData,
-                   character_input: CharacterInput) -> io::Result<()> {
+    pub fn do_tick(&mut self, character_input: CharacterInput,
+                   socket: &mut ClientSocket, con_id: ConId) -> io::Result<()> {
         if let Some(ref mut data) = self.after_snapshot_data {
             data.update_tick();
-            data.send_and_save_input(network, con_data, character_input)?;
+            data.send_and_save_input(character_input, socket, con_id)?;
             data.remove_old_snapshots_and_inputs();
             data.update_model(self.my_player_id);
         }

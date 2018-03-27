@@ -16,8 +16,9 @@ use shared::consts::TICK_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::tick_time::TickInstant;
-use shared::net::socket::ConnectionData;
-use shared::net::socket::ConnectionDataWrapper;
+use shared::net::socket::ConId;
+use shared::net::socket::CheckedMessage;
+use shared::net::socket::ConMessage;
 use shared::net::socket::ReliableSocket;
 use shared::net::ClientMessage;
 use shared::net::ConlessClientMessage::*;
@@ -25,43 +26,24 @@ use shared::net::ReliableClientMessage::*;
 use shared::net::UnreliableClientMessage::*;
 use shared::net::ServerMessage;
 use shared::net::ConlessServerMessage::*;
-use shared::net::ReliableServerMessage::*;
 use shared::net::UnreliableServerMessage::*;
 use shared::net::Snapshot;
 
 use socket::WrappedServerUdpSocket;
 
-impl ConnectionDataWrapper for Client {
-    fn con_data(&self) -> &ConnectionData {
-        &self.con_data
-    }
-
-    fn con_data_mut(&mut self) -> &mut ConnectionData {
-        &mut self.con_data
-    }
-}
-
-enum RemoveReason {
-    UserDisconnect,
-    Kicked,
-    TimedOut,
-}
-
 struct Client {
     player_id: u64,
     inputs: HashMap<u64, CharacterInput>,
-    con_data: ConnectionData,
 }
 
 pub struct Server {
-    socket: ReliableSocket<ServerMessage, ClientMessage, SocketAddr, WrappedServerUdpSocket>,
+    socket: ReliableSocket<SocketAddr, ServerMessage, ClientMessage, WrappedServerUdpSocket>,
+    clients: HashMap<ConId, Client>, // TODO consider making this an array
     model: Model,
     tick: u64,
     tick_time: Instant,
     next_tick_time: Instant,
-    clients: HashMap<SocketAddr, Client>,
-    to_remove_clients: HashMap<SocketAddr, RemoveReason>,
-    removed_clients: HashMap<SocketAddr, ConnectionData>,
+    con_id_by_player_id: HashMap<u64, ConId>,
     closing: bool,
 }
 
@@ -72,14 +54,13 @@ impl Server {
             udp_socket: UdpBuilder::new_v6()?.only_v6(false)?.bind(("::", 51946))?,
         };
         Ok(Server {
+            clients: HashMap::new(),
             socket: ReliableSocket::new(wrapped_socket),
             model: Model::new(),
             tick: 0,
             tick_time: Instant::now(),
             next_tick_time: Instant::now(),
-            clients: HashMap::new(),
-            to_remove_clients: HashMap::new(),
-            removed_clients: HashMap::new(),
+            con_id_by_player_id: HashMap::new(),
             closing: false,
         })
     }
@@ -99,9 +80,11 @@ impl Server {
             self.tick_time = self.next_tick_time;
             self.next_tick_time = start_tick_time + (self.tick + 1) / TICK_SPEED;
 
-            // update clients
-            self.check_timeouts();
-            self.remove_clients();
+            // let socket tick
+            if let Err(err) = self.socket.do_tick() {
+                println!("ERROR: Network broken: {:?}", err);
+                return;
+            }
 
             // tick
             for (_, client) in self.clients.iter_mut() {
@@ -111,7 +94,7 @@ impl Server {
             }
             self.model.do_tick();
             let msg = SnapshotMessage(Snapshot::new(self.tick, &self.model));
-            self.socket.broadcast_unreliable(msg, self.clients.iter_mut()).unwrap(); // TODO remove unwrap
+            self.socket.broadcast_unreliable(msg).unwrap(); // TODO remove unwrap
             tick_counter += 1;
 
             // display tick rate
@@ -128,16 +111,10 @@ impl Server {
         }
     }
 
-    fn check_timeouts(&mut self) {
-        for (id, client) in self.clients.iter() {
-            if client.con_data.timed_out() {
-                self.to_remove_clients.insert(*id, RemoveReason::TimedOut);
-            }
-        }
-    }
-
-    fn remove_clients(&mut self) {
+    /*fn remove_clients(&mut self) {
+        // TODO move somewhere else
         for (addr, reason) in self.to_remove_clients.drain() {
+            // TODO use reason
             let mut client = self.clients.remove(&addr).unwrap();
             let _name = self.model.remove_player(client.player_id).unwrap().take_name(); // TODO for leave message
             let msg = ConnectionClose;
@@ -145,16 +122,12 @@ impl Server {
             self.removed_clients.insert(addr, client.con_data);
             // TODO broadcast leave message
         }
-    }
+    }*/
 
     fn handle_traffic(&mut self) {
         loop {
-            match self.socket.recv_from_until(
-                self.next_tick_time,
-                &mut self.clients,
-                &mut self.removed_clients,
-            ) {
-                Ok(Some((msg, addr))) => self.handle_message(msg, addr),
+            match self.socket.recv_from_until(self.next_tick_time) {
+                Ok(Some(msg)) => self.handle_message(msg),
                 Ok(None) => break,
                 Err(e) => {
                     println!("ERROR: Network broken: {:?}", e);
@@ -170,63 +143,72 @@ impl Server {
         }
     }
 
-    fn handle_message(&mut self, message: ClientMessage, addr: SocketAddr) {
+    fn handle_message(&mut self, msg: CheckedMessage<SocketAddr, ClientMessage>) {
+        if let CheckedMessage::Conful {
+            con_id,
+            cmsg: ConMessage::Reliable(DisconnectRequest)
+        } = msg {
+            let client = self.clients.remove(&con_id).unwrap();
+            self.con_id_by_player_id.remove(&client.player_id).unwrap();
+            self.model.remove_player(client.player_id);
+            self.socket.terminate(con_id);
+            // TODO send leave message
+            return;
+        }
         let recv_time = Instant::now();
-        match message {
-            ClientMessage::Conless(msg) => {
-                match msg {
+        match msg {
+            CheckedMessage::Conless { addr, clmsg } => {
+                match clmsg {
                     ConnectionRequest => {
-                        if let Some(client) = self.clients.get(&addr) {
-                            // TODO send another connection confirm to client and reset their connection meta data
-                            return;
-                        }
                         let player_id = self.model.add_player(String::from("UnknownPlayer"));
-                        self.clients.insert(addr, Client {
+                        self.socket.send_to_conless(addr, ConnectionConfirm(player_id)).unwrap(); // TODO remove unwrap
+                        let con_id = self.socket.connect(addr);
+                        self.con_id_by_player_id.insert(player_id, con_id);
+                        self.clients.insert(con_id, Client {
                             player_id,
                             inputs: HashMap::new(),
-                            con_data: ConnectionData::new(),
                         });
-                        self.socket.send_to_conless(ConnectionConfirm(player_id), addr).unwrap(); // TODO remove unwrap
                     },
                 }
             },
-            ClientMessage::Reliable(msg) => {
-                match msg {
-                    DisconnectRequest => {
-                        self.to_remove_clients.insert(addr, RemoveReason::UserDisconnect);
-                    },
-                }
-            },
-            ClientMessage::Unreliable(msg) => {
-                let client = self.clients.get_mut(&addr).unwrap();
-                match msg {
-                    InputMessage { tick, input } => {
-                        if tick > self.tick {
-                            self.socket.send_to_unreliable(
-                                InputAck {
-                                    input_tick: tick,
-                                    arrival_tick_instant: TickInstant::from_interval(
-                                        self.tick,
-                                        self.tick_time,
-                                        self.next_tick_time,
-                                        recv_time,
-                                    )
-                                },
-                                addr,
-                                &mut client.con_data,
-                            ).unwrap(); // TODO remove unwrap
-                            // TODO ignore insanely high ticks
-                            client.inputs.insert(tick, input);
-                        } else {
-                            println!(
-                                "Input came too late! | Current tick: {} | Target tick: {}",
-                                self.tick,
-                                tick,
-                            );
+            CheckedMessage::Conful { con_id, cmsg } => {
+                let client = self.clients.get_mut(&con_id).unwrap();
+                match cmsg {
+                    ConMessage::Reliable(rmsg) => {
+                        match rmsg {
+                            DisconnectRequest => (), // handled earlier
                         }
-                    },
+                    }
+                    ConMessage::Unreliable(umsg) => {
+                        match umsg {
+                            InputMessage { tick, input } => {
+                                if tick > self.tick {
+                                    self.socket.send_to_unreliable(
+                                        con_id,
+                                        InputAck {
+                                            input_tick: tick,
+                                            arrival_tick_instant: TickInstant::from_interval(
+                                                self.tick,
+                                                self.tick_time,
+                                                self.next_tick_time,
+                                                recv_time,
+                                            )
+                                        },
+                                    ).unwrap(); // TODO remove unwrap
+                                    // TODO ignore insanely high ticks
+                                    client.inputs.insert(tick, input);
+                                } else {
+                                    println!(
+                                        "Input came too late! | Current tick: {} | Target tick: {}",
+                                        self.tick,
+                                        tick,
+                                    );
+                                }
+                            },
+                        }
+                    }
                 }
-            }
+            },
         }
     }
 }
