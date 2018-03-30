@@ -233,19 +233,6 @@ impl Server {
                         match umsg {
                             InputMessage { tick, input } => {
                                 if tick > self.tick {
-                                    self.socket.send_to_unreliable(
-                                        con_id,
-                                        InputAck {
-                                            input_tick: tick,
-                                            arrival_tick_instant: TickInstant::from_interval(
-                                                self.tick,
-                                                self.tick_time,
-                                                self.next_tick_time,
-                                                recv_time,
-                                            )
-                                        },
-                                        &mut self.event_queue,
-                                    );
                                     // TODO ignore insanely high ticks
                                     client.inputs.insert(tick, input);
                                 } else {
@@ -255,6 +242,19 @@ impl Server {
                                         tick,
                                     );
                                 }
+                                self.socket.send_to_unreliable(
+                                    con_id,
+                                    InputAck {
+                                        input_tick: tick,
+                                        arrival_tick_instant: TickInstant::from_interval(
+                                            self.tick,
+                                            self.tick_time,
+                                            self.next_tick_time,
+                                            recv_time,
+                                        )
+                                    },
+                                    &mut self.event_queue,
+                                );
                             },
                         }
                     }
