@@ -137,19 +137,6 @@ impl Server {
         }
     }
 
-    /*fn remove_clients(&mut self) {
-        // TODO move somewhere else
-        for (addr, reason) in self.to_remove_clients.drain() {
-            // TODO use reason
-            let mut client = self.clients.remove(&addr).unwrap();
-            let _name = self.model.remove_player(client.player_id).unwrap().take_name(); // TODO for leave message
-            let msg = ConnectionClose;
-            self.socket.send_to_reliable(msg, addr, &mut client.con_data).unwrap(); // TODO remove unwrap
-            self.removed_clients.insert(addr, client.con_data);
-            // TODO broadcast leave message
-        }
-    }*/
-
     fn handle_traffic(&mut self) -> TickTarget {
         loop {
             let mut next_loop_time = self.next_tick_time;
@@ -202,21 +189,34 @@ impl Server {
         }
         let recv_time = Instant::now();
         match msg {
-            CheckedMessage::Conless { addr, clmsg } => {
+            CheckedMessage::Conless { addr, con_id, clmsg } => {
                 match clmsg {
                     ConnectionRequest => {
-                        let player_id = self.model.add_player(String::from("UnknownPlayer"));
+                        let player_id = match con_id {
+                            Some(con_id) => {
+                                // repeat confirm message
+                                self.clients.get(&con_id).unwrap().player_id
+                            },
+                            None => {
+                                // create new player
+                                let player_id = self.model.add_player(
+                                    String::from("UnknownPlayer")
+                                );
+                                let con_id = self.socket.connect(addr);
+                                self.con_id_by_player_id.insert(player_id, con_id);
+                                self.clients.insert(con_id, Client {
+                                    player_id,
+                                    inputs: HashMap::new(),
+                                });
+                                // TODO broadcast join message
+                                player_id
+                            },
+                        };
                         self.socket.send_to_conless(
                             addr,
                             ConnectionConfirm(player_id),
                             &mut self.event_queue,
                         );
-                        let con_id = self.socket.connect(addr);
-                        self.con_id_by_player_id.insert(player_id, con_id);
-                        self.clients.insert(con_id, Client {
-                            player_id,
-                            inputs: HashMap::new(),
-                        });
                     },
                 }
             },
@@ -266,7 +266,7 @@ impl Server {
         let client = self.clients.remove(&con_id).unwrap();
         self.con_id_by_player_id.remove(&client.player_id).unwrap();
         self.model.remove_player(client.player_id);
-        // TODO send leave message
+        // TODO broadcast leave message
         return;
     }
 }

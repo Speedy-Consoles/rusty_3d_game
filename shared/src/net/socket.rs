@@ -19,6 +19,13 @@ use self::SocketEvent::*;
 use self::CheckedMessage::*;
 use self::ConMessage::*;
 
+pub trait WrappedUdpSocket<AddrType>: Sized {
+    fn send_to(&self, buf: &[u8], addr: AddrType) -> io::Result<usize>;
+    fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, AddrType)>;
+    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()>;
+    fn set_read_timeout(&self, Option<Duration>) -> io::Result<()>;
+}
+
 pub enum SocketEvent<AddrType, RecvType: Message> {
     MessageReceived(CheckedMessage<AddrType, RecvType>),
     DoneDisconnecting(u64),
@@ -38,27 +45,21 @@ pub enum SocketEvent<AddrType, RecvType: Message> {
     NetworkError(io::Error),
 }
 
-pub trait WrappedUdpSocket<AddrType>: Sized {
-    fn send_to(&self, buf: &[u8], addr: AddrType) -> io::Result<usize>;
-    fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, AddrType)>;
-    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()>;
-    fn set_read_timeout(&self, Option<Duration>) -> io::Result<()>;
-}
-
-pub enum ConMessage<T: Message> {
-    Reliable(T::Reliable),
-    Unreliable(T::Unreliable),
-}
-
 pub enum CheckedMessage<AddrType, RecvType: Message> {
     Conless {
         addr: AddrType,
+        con_id: Option<ConId>,
         clmsg: RecvType::Conless,
     },
     Conful {
         con_id: u64,
         cmsg: ConMessage<RecvType>,
     }
+}
+
+pub enum ConMessage<T: Message> {
+    Reliable(T::Reliable),
+    Unreliable(T::Unreliable),
 }
 
 pub type ConId = u64;
@@ -443,9 +444,11 @@ impl<
                             let payload_slice = &buf[header_size..amount];
                             match header {
                                 MessageHeader::Conless => {
+                                    let con_id = self.con_ids_by_addr.get(&addr).map(|id| *id);
                                     match RecvType::Conless::unpack(payload_slice) {
                                         Ok(clmsg) => return Some(MessageReceived(Conless {
                                             addr,
+                                            con_id,
                                             clmsg,
                                         })),
                                         Err(e) => println!(
