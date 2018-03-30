@@ -14,7 +14,7 @@ pub const TICK_SPEED: TickRate = TickRate { per_second: 120 };
 // TODO move const fixed points from model here
 
 // network
-pub fn ack_timeout() -> Duration {
+pub fn timeout_duration() -> Duration {
     Duration::from_secs(10)
 }
 pub const MAX_UNACKED_MESSAGES: usize = 1024;

@@ -75,7 +75,7 @@ impl RemoteServerInterface {
             event_queue: EventQueue::new(),
             socket: ReliableSocket::new(
                 WrappedClientUdpSocket { udp_socket },
-                consts::ack_timeout(),
+                consts::timeout_duration(),
                 consts::disconnect_force_timeout()
             ),
             internal_state: Connecting {
@@ -89,7 +89,7 @@ impl RemoteServerInterface {
             &Connected { con_id, .. },
             &CheckedMessage::Conful { cmsg: ConMessage::Reliable(ConnectionClose), .. }
         ) = (&self.internal_state, &msg) {
-            self.socket.terminate(con_id);
+            self.socket.terminate(con_id, &mut self.event_queue);
             self.internal_state = Disconnected(Kicked {
                 kick_message: String::from("You were kicked for some reason"), // TODO replace with actual message
             });

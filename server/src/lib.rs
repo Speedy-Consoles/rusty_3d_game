@@ -69,8 +69,8 @@ impl Server {
         Ok(Server {
             socket: ReliableSocket::new(
                 wrapped_socket,
-                consts::ack_timeout(),
-                consts::ack_timeout(),
+                consts::timeout_duration(),
+                consts::timeout_duration(),
             ),
             event_queue: EventQueue::new(),
             clients: HashMap::new(),
@@ -184,7 +184,7 @@ impl Server {
             cmsg: ConMessage::Reliable(DisconnectRequest)
         } = msg {
             self.remove_client(con_id);
-            self.socket.terminate(con_id);
+            self.socket.terminate(con_id, &mut self.event_queue);
             return;
         }
         let recv_time = Instant::now();

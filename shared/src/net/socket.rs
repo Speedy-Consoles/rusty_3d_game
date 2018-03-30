@@ -88,13 +88,13 @@ struct Connection<AddrType: Copy> {
     my_resend: bool,
     their_ack: u64,
     their_resend: bool,
-    last_ack_time: Instant,
+    last_recv_time: Instant,
     disconnecting: bool,
 }
 
 impl<AddrType: Copy> Connection<AddrType> {
     fn on_ack(&mut self, their_ack: u64, their_resend: bool) {
-        self.last_ack_time = Instant::now();
+        self.last_recv_time = Instant::now();
         self.their_ack = their_ack;
         self.their_resend = their_resend;
 
@@ -175,6 +175,24 @@ impl<AddrType: Copy> Connection<AddrType> {
             event_queue.push_back(SocketEvent::NetworkError(e));
         }
     }
+
+    fn send_ack<S, RecvType: Message>(&mut self, socket: &S,
+        event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>)
+    where
+        S: WrappedUdpSocket<AddrType>,
+    {
+        let mut buf = [0; MAX_MESSAGE_LENGTH];
+        let header = MessageHeader::Conful {
+            ack: self.my_ack,
+            resend: self.my_resend,
+            conful_header: ConfulHeader::Ack,
+        };
+        self.my_resend = false;
+        let header_size = header.pack(&mut buf).unwrap();
+        if let Err(e) = socket.send_to(&buf[..header_size], self.addr) {
+            event_queue.push_back(SocketEvent::NetworkError(e));
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -206,8 +224,8 @@ pub struct ReliableSocket<
     con_ids_by_addr: HashMap<AddrType, ConId>, // TODO consider replacing this by linear search
     socket: WrappedUdpSocketType,
     next_tick_time: Instant,
-    ack_timeout: Duration,
-    ack_timeout_disconnecting: Duration,
+    timeout_duration: Duration,
+    timeout_duration_disconnecting: Duration,
     phantom_send: PhantomData<SendType>,
     phantom_recv: PhantomData<RecvType>,
 }
@@ -227,8 +245,8 @@ impl<
             con_ids_by_addr: HashMap::new(),
             socket: wrapped_udp_socket,
             next_tick_time: Instant::now(),
-            ack_timeout,
-            ack_timeout_disconnecting,
+            timeout_duration: ack_timeout,
+            timeout_duration_disconnecting: ack_timeout_disconnecting,
             phantom_send: PhantomData,
             phantom_recv: PhantomData,
         }
@@ -249,7 +267,7 @@ impl<
             my_resend: false,
             their_ack: 0,
             their_resend: false,
-            last_ack_time: Instant::now(),
+            last_recv_time: Instant::now(),
             disconnecting: false,
         });
         self.con_ids_by_addr.insert(addr, id);
@@ -264,9 +282,11 @@ impl<
         }
     }
 
-    pub fn terminate(&mut self, con_id: ConId) {
-        if let Some(con) = self.connections.remove(&con_id) {
+    pub fn terminate(&mut self, con_id: ConId,
+                     event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
+        if let Some(mut con) = self.connections.remove(&con_id) {
             self.con_ids_by_addr.remove(&con.addr).unwrap();
+            con.send_ack(&self.socket, event_queue);
         } else {
             println!("ERROR: Tried to disconnect non-existing connection");
         }
@@ -276,10 +296,14 @@ impl<
         // TODO maybe also resend?
         let now = Instant::now();
         for (&con_id, con) in self.connections.iter_mut() {
-            let ack_silence = now - con.last_ack_time;
-            let timed_out = !con.disconnecting && ack_silence > self.ack_timeout;
-            let timed_out_dc = con.disconnecting && ack_silence > self.ack_timeout_disconnecting;
-            if timed_out || timed_out_dc {
+            // check if didn't hear anything for too long
+            let recv_silence = now - con.last_recv_time;
+            let timed_out = if con.disconnecting {
+                recv_silence > self.timeout_duration_disconnecting
+            } else {
+                recv_silence > self.timeout_duration
+            };
+            if timed_out {
                 self.remove_connections_buffer.push(con_id);
                 continue;
             }
@@ -513,11 +537,15 @@ impl<
             let con = self.connections.get_mut(&con_id).unwrap();
             con.on_ack(their_ack, their_resend);
             if con.disconnecting {
-                println!("DEBUG: Received connectionful message from disconnecting connection!");
                 match header {
-                    ConfulHeader::Reliable(_) | ConfulHeader::Unreliable => {
+                    ConfulHeader::Reliable(_) => {
                         println!(
-                            "DEBUG: Received connectionful message from disconnecting connection!"
+                            "DEBUG: Received reliable message from disconnecting connection!"
+                        );
+                    },
+                    ConfulHeader::Unreliable => {
+                        println!(
+                            "DEBUG: Received unreliable message from disconnecting connection!"
                         );
                     },
                     ConfulHeader::Ack => (),
