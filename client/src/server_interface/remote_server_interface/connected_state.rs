@@ -178,7 +178,7 @@ impl AfterSnapshotData {
         let mut speed_factor;
         if float_tick_diff < jump_threshold {
             // TODO replace this simple linear function with something more thoughtful
-            speed_factor = 1.0 + float_tick_diff * factor_factor
+            speed_factor = 1.0 + float_tick_diff * factor_factor;
         } else {
             println!("WARNING: Jumping from {} to {}!",
                      self.tick,

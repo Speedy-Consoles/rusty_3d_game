@@ -13,8 +13,7 @@ use super::ServerInterface;
 use self::InternalState::*;
 
 enum InternalState {
-    BeforeFirstTick,
-    AfterFirstTick {
+    Running {
         start_tick_time: Instant,
         my_player_id: u64,
         tick: u64,
@@ -22,16 +21,26 @@ enum InternalState {
         next_tick_time: Instant,
         model: Model,
     },
-    AfterDisconnect,
+    Disconnected,
 }
+
 pub struct LocalServerInterface {
     internal_state: InternalState,
 }
 
 impl LocalServerInterface {
     pub fn new() -> LocalServerInterface {
+        let now = Instant::now();
+        let mut model = Model::new();
         LocalServerInterface {
-            internal_state: BeforeFirstTick,
+            internal_state: Running {
+                start_tick_time: now,
+                my_player_id: model.add_player(String::from("Player")),
+                tick: 0,
+                tick_time: now,
+                next_tick_time: now + 1 / TICK_SPEED,
+                model,
+            },
         }
     }
 }
@@ -40,22 +49,7 @@ impl ServerInterface for LocalServerInterface {
     fn do_tick(&mut self, input: CharacterInput) {
         let now = Instant::now();
         match self.internal_state {
-            BeforeFirstTick => {
-                let mut model = Model::new();
-                let my_player_id = model.add_player(String::from("Player"));
-                model.set_character_input(my_player_id, input);
-                model.do_tick();
-
-                self.internal_state = AfterFirstTick {
-                    start_tick_time: now,
-                    my_player_id,
-                    tick: 0,
-                    tick_time: now,
-                    next_tick_time: now + 1 / TICK_SPEED,
-                    model,
-                };
-            },
-            AfterFirstTick {
+            Running {
                 start_tick_time,
                 my_player_id,
                 ref mut tick,
@@ -76,7 +70,7 @@ impl ServerInterface for LocalServerInterface {
                     model.do_tick();
                 }
             },
-            AfterDisconnect => (),
+            Disconnected => (),
         }
     }
 
@@ -91,8 +85,7 @@ impl ServerInterface for LocalServerInterface {
 
     fn connection_state(&self) -> ConnectionState {
         match self.internal_state {
-            BeforeFirstTick => ConnectionState::Connecting,
-            AfterFirstTick {
+            Running {
                 my_player_id,
                 tick,
                 ref model,
@@ -112,22 +105,21 @@ impl ServerInterface for LocalServerInterface {
                     predicted_world: model.world(),
                 }
             },
-            AfterDisconnect => ConnectionState::Disconnected(DisconnectedReason::UserDisconnect),
+            Disconnected => ConnectionState::Disconnected(DisconnectedReason::UserDisconnect),
         }
     }
 
     fn next_game_tick_time(&self) -> Option<Instant> {
         match self.internal_state {
-            BeforeFirstTick => Some(Instant::now()),
-            AfterFirstTick { ref start_tick_time, ref tick, .. } => {
+            Running { ref start_tick_time, ref tick, .. } => {
                 Some(*start_tick_time + (tick + 1) / TICK_SPEED)
             },
-            AfterDisconnect => None,
+            Disconnected => None,
         }
     }
 
     fn disconnect(&mut self) {
-        self.internal_state = AfterDisconnect
+        self.internal_state = Disconnected
     }
 
     fn do_socket_tick(&mut self) {
