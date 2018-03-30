@@ -6,6 +6,7 @@ use shared::tick_time::TickInstant;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 
+use super::HandleTrafficResult;
 use super::ConnectionState;
 use super::DisconnectedReason;
 use super::ServerInterface;
@@ -79,14 +80,13 @@ impl ServerInterface for LocalServerInterface {
         }
     }
 
-    fn handle_traffic(&mut self, until: Instant) {
-        loop {
-            let now = Instant::now();
-            if until <= now {
-                break;
-            }
-            thread::sleep(until - now);
+    fn handle_traffic(&mut self, until: Instant) -> HandleTrafficResult {
+        let now = Instant::now();
+        if until <= now {
+            return HandleTrafficResult::Timeout;
         }
+        thread::sleep(until - now);
+        HandleTrafficResult::Timeout
     }
 
     fn connection_state(&self) -> ConnectionState {
@@ -116,7 +116,7 @@ impl ServerInterface for LocalServerInterface {
         }
     }
 
-    fn next_tick_time(&self) -> Option<Instant> {
+    fn next_game_tick_time(&self) -> Option<Instant> {
         match self.internal_state {
             BeforeFirstTick => Some(Instant::now()),
             AfterFirstTick { ref start_tick_time, ref tick, .. } => {
@@ -128,5 +128,13 @@ impl ServerInterface for LocalServerInterface {
 
     fn disconnect(&mut self) {
         self.internal_state = AfterDisconnect
+    }
+
+    fn do_socket_tick(&mut self) {
+        // nothing
+    }
+
+    fn next_socket_tick_time(&self) -> Option<Instant> {
+        None
     }
 }

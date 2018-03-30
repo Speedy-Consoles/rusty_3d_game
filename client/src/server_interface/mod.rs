@@ -11,6 +11,11 @@ use shared::model::world::character::CharacterInput;
 pub use self::local_server_interface::*;
 pub use self::remote_server_interface::*;
 
+pub enum HandleTrafficResult {
+    Interrupt,
+    Timeout,
+}
+
 #[derive(Clone, Copy)]
 pub enum DisconnectedReason<'a> {
     NetworkError,
@@ -36,8 +41,10 @@ pub enum ConnectionState<'a> {
 
 pub trait ServerInterface {
     fn do_tick(&mut self, input: CharacterInput);
-    fn handle_traffic(&mut self, until: Instant);
+    fn handle_traffic(&mut self, until: Instant) -> HandleTrafficResult;
     fn connection_state(&self) -> ConnectionState;
-    fn next_tick_time(&self) -> Option<Instant>;
+    fn next_game_tick_time(&self) -> Option<Instant>;
     fn disconnect(&mut self);
+    fn do_socket_tick(&mut self);
+    fn next_socket_tick_time(&self) -> Option<Instant>;
 }

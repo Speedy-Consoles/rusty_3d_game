@@ -30,8 +30,17 @@ use server_interface::ServerInterface;
 use server_interface::LocalServerInterface;
 use server_interface::RemoteServerInterface;
 use server_interface::ConnectionState::*;
+use server_interface::HandleTrafficResult;
 use config::Config;
 use menu::Menu;
+use TickTarget::*;
+
+enum TickTarget {
+    GameTick,
+    SocketTick,
+    GraphicsTick,
+    BaseTick,
+}
 
 pub struct Client {
     events_loop: glutin::EventsLoop,
@@ -93,70 +102,45 @@ impl Client {
         let mut draw_counter = 0;
 
         // for sleep timing
-        let mut next_draw_time = Instant::now();
+        let mut next_draw_time = Some(Instant::now());
 
         // main loop
         loop {
-            // events
+            // window events, controls
             self.handle_events();
             self.handle_controls();
 
-            // tick
-            if let Some(next_tick_time) = self.server_interface.next_tick_time() {
-                let before_tick = Instant::now();
-                if next_tick_time <= before_tick {
-                    let mut character_input = self.character_input;
-                    if self.menu.active() {
-                        character_input = Default::default();
-                        character_input.view_dir = self.character_input.view_dir;
-                    }
-                    self.server_interface.do_tick(character_input);
-                    self.character_input.reset_flags();
-                    tick_counter += 1;
-                }
-            }
-
-            self.update_cursor();
-
-            // draw
-            let before_draw = Instant::now();
-            if before_draw >= next_draw_time {
-                if let Connected { tick_instant, my_player_id, model, predicted_world }
-                        = self.server_interface.connection_state() {
-                    let view_dir = if self.config.direct_camera {
-                        Some(self.character_input.view_dir)
-                    } else {
-                        None
-                    };
-
-                    self.graphics.draw(
-                        model,
-                        predicted_world,
-                        my_player_id,
-                        view_dir,
-                        tick_instant,
-                        &self.display
-                    );
-                    draw_counter += 1;
-                }
-                let draw_tick_diff = (next_draw_time.elapsed() * DRAW_SPEED).ticks;
-                next_draw_time += (draw_tick_diff + 1) / DRAW_SPEED;
-            }
-
-            // display rates
-            let now = Instant::now();
-            if now - last_sec > std::time::Duration::from_secs(1) {
-                println!("ticks/s: {}, draws/s: {}", tick_counter, draw_counter);
-                tick_counter = 0;
-                draw_counter = 0;
-                last_sec += std::time::Duration::from_secs(1)
-            }
-
             // sleep / handle traffic
-            let min_loop_rate_time = Instant::now() + 1 / BASE_SPEED;
-            let next_loop_time = self.server_interface.next_tick_time()
-                .unwrap_or(min_loop_rate_time).min(next_draw_time);
-            self.server_interface.handle_traffic(next_loop_time);
+            let mut tick_target = BaseTick;
+            let mut next_loop_time = Instant::now() + 1 / BASE_SPEED;
+            loop {
+                match self.server_interface.next_game_tick_time() {
+                    Some(next_game_tick_time) if next_game_tick_time < next_loop_time => {
+                        tick_target = GameTick;
+                        next_loop_time = next_game_tick_time;
+                    },
+                    _ => (),
+                }
+                match self.server_interface.next_socket_tick_time() {
+                    Some(next_socket_tick_time) if next_socket_tick_time < next_loop_time => {
+                        tick_target = SocketTick;
+                        next_loop_time = next_socket_tick_time;
+                    },
+                    _ => (),
+                }
+                match next_draw_time {
+                    Some(next_graphics_tick_time) if next_graphics_tick_time < next_loop_time => {
+                        tick_target = GraphicsTick;
+                        next_loop_time = next_graphics_tick_time;
+                    },
+                    _ => (),
+                }
+                if let HandleTrafficResult::Timeout
+                        = self.server_interface.handle_traffic(next_loop_time) {
+                    break;
+                };
+                // TODO maybe add conditional break here, to make sure the client stays responsive on DDoS
+            }
 
             // handle closing request
             if self.closing {
@@ -166,6 +150,62 @@ impl Client {
                     Disconnecting => (),
                     Disconnected(_) => break,
                 }
+            }
+
+            // tick
+            match tick_target {
+                GameTick => {
+                    let mut character_input = self.character_input;
+                    if self.menu.active() {
+                        character_input = Default::default();
+                        character_input.view_dir = self.character_input.view_dir;
+                    }
+                    self.server_interface.do_tick(character_input);
+                    self.character_input.reset_flags();
+                    tick_counter += 1;
+                },
+                SocketTick => self.server_interface.do_socket_tick(),
+                GraphicsTick => {
+                    if let Connected {
+                        tick_instant,
+                        my_player_id,
+                        model,
+                        predicted_world,
+                    } = self.server_interface.connection_state() {
+                        let view_dir = if self.config.direct_camera {
+                            Some(self.character_input.view_dir)
+                        } else {
+                            None
+                        };
+
+                        self.graphics.draw(
+                            model,
+                            predicted_world,
+                            my_player_id,
+                            view_dir,
+                            tick_instant,
+                            &self.display
+                        );
+                        draw_counter += 1;
+                    }
+                    if let Some(mut next_graphics_tick) = next_draw_time {
+                        let draw_tick_diff = (next_graphics_tick.elapsed() * DRAW_SPEED).ticks;
+                        next_graphics_tick += (draw_tick_diff + 1) / DRAW_SPEED;
+                        next_draw_time = Some(next_graphics_tick);
+                    }
+                },
+                BaseTick => (),
+            }
+
+            self.update_cursor();
+
+            // display rates
+            let now = Instant::now();
+            if now - last_sec > std::time::Duration::from_secs(1) {
+                println!("ticks/s: {}, draws/s: {}", tick_counter, draw_counter);
+                tick_counter = 0;
+                draw_counter = 0;
+                last_sec += std::time::Duration::from_secs(1)
             }
         }
     }

@@ -6,9 +6,11 @@ use std::io;
 use std::net::UdpSocket;
 use std::net::SocketAddr;
 use std::thread;
+use std::collections::VecDeque;
 
 use shared::model::world::character::CharacterInput;
 use shared::consts;
+use shared::net::socket::SocketEvent;
 use shared::net::socket::ConId;
 use shared::net::socket::ReliableSocket;
 use shared::net::socket::ConMessage;
@@ -23,10 +25,13 @@ use shared::net::ReliableClientMessage::*;
 use super::DisconnectedReason;
 use super::ConnectionState;
 use super::ServerInterface;
+use super::HandleTrafficResult;
 use self::connected_state::ConnectedState;
 use self::InternalState::*;
 use self::InternalDisconnectedReason::*;
 use self::socket::WrappedClientUdpSocket;
+
+type EventQueue = VecDeque<SocketEvent<(), ServerMessage>>;
 
 enum InternalDisconnectedReason {
     NetworkError(io::Error),
@@ -45,15 +50,14 @@ enum InternalState {
         con_id: ConId,
         con_state: ConnectedState,
     },
-    Disconnecting {
-        force_timeout_time: Instant,
-    },
+    Disconnecting,
     Disconnected(InternalDisconnectedReason),
 }
 
 type ClientSocket = ReliableSocket<(), ClientMessage, ServerMessage, WrappedClientUdpSocket>;
 
 pub struct RemoteServerInterface {
+    event_queue: EventQueue,
     internal_state: InternalState,
     socket: ClientSocket,
 }
@@ -68,7 +72,12 @@ impl RemoteServerInterface {
         let udp_socket = UdpSocket::bind(local_addr)?;
         udp_socket.connect(addr)?;
         Ok(RemoteServerInterface {
-            socket: ReliableSocket::new(WrappedClientUdpSocket { udp_socket }),
+            event_queue: EventQueue::new(),
+            socket: ReliableSocket::new(
+                WrappedClientUdpSocket { udp_socket },
+                consts::ack_timeout(),
+                consts::disconnect_force_timeout()
+            ),
             internal_state: Connecting {
                 resend_time: Instant::now(),
             },
@@ -104,8 +113,7 @@ impl RemoteServerInterface {
                     CheckedMessage::Conless { .. } => (), // TODO connection reset?
                     CheckedMessage::Conful { cmsg, .. } => match cmsg {
                         ConMessage::Reliable(rmsg) => con_state.handle_reliable_message(rmsg),
-                        ConMessage::Unreliable(umsg)
-                            => con_state.handle_unreliable_message(umsg),
+                        ConMessage::Unreliable(umsg) => con_state.handle_unreliable_message(umsg),
                     }
                 }
             },
@@ -116,52 +124,51 @@ impl RemoteServerInterface {
 
 impl ServerInterface for RemoteServerInterface {
     fn do_tick(&mut self, character_input: CharacterInput) {
-        if let Err(err) = self.socket.do_tick() {
-            // TODO notify about unacked messages
-            self.internal_state = Disconnected(NetworkError(err));
-            return;
-        }
-
-        let mut result = Ok(());
         match self.internal_state {
             Connecting { ref mut resend_time } => {
                 *resend_time = Instant::now() + consts::connection_request_resend_interval();
-                result = self.socket.send_to_conless((), ConnectionRequest);
+                self.socket.send_to_conless((), ConnectionRequest, &mut self.event_queue);
             },
             Connected { ref mut con_state, con_id } => {
-                result = con_state.do_tick(character_input, &mut self.socket, con_id)
+                con_state.do_tick(character_input, &mut self.socket, con_id, &mut self.event_queue)
             },
-            Disconnecting { force_timeout_time, .. } => {
-                if self.socket.done() {
-                    self.internal_state = Disconnected(UserDisconnect);
-                } else if Instant::now() > force_timeout_time {
-                    // TODO notify about unacked messages
-                    self.internal_state = Disconnected(UserDisconnect);
-                }
-            },
-            Disconnected(_) => (),
+            Disconnecting | Disconnected(_) => (),
         };
-        if let Err(err) = result {
-            self.internal_state = Disconnected(NetworkError(err));
-        }
     }
 
-    fn handle_traffic(&mut self, until: Instant) {
-        loop {
-            match self.socket.recv_from_until(until) {
-                Ok(Some(msg)) => self.handle_message(msg),
-                Ok(None) => break,
-                Err(e) => {
-                    println!("ERROR: Network broken: {:?}", e);
-                    self.internal_state = Disconnected(NetworkError(e));
-                    let now = Instant::now();
-                    if now < until {
-                        thread::sleep(until - now);
-                    }
-                    break;
+    fn handle_traffic(&mut self, until: Instant) -> HandleTrafficResult {
+        match self.event_queue.pop_front().or_else(|| self.socket.recv_from_until(until)) {
+            Some(SocketEvent::MessageReceived(msg)) => {
+                self.handle_message(msg);
+                HandleTrafficResult::Interrupt
+            },
+            Some(SocketEvent::DoneDisconnecting(_)) => {
+                println!("DEBUG: Disconnected gracefully!");
+                self.internal_state = Disconnected(UserDisconnect);
+                HandleTrafficResult::Interrupt
+            },
+            Some(SocketEvent::TimeoutDuringDisconnect { .. }) => {
+                println!("DEBUG: Timed out during disconnect!");
+                // TODO inform about unsent messages
+                self.internal_state = Disconnected(UserDisconnect);
+                HandleTrafficResult::Interrupt
+            },
+            Some(SocketEvent::Timeout { .. }) | Some(SocketEvent::ConReset { .. }) => {
+                println!("DEBUG: Timed out!");
+                // TODO inform about unsent messages
+                self.internal_state = Disconnected(TimedOut);
+                HandleTrafficResult::Interrupt
+            },
+            Some(SocketEvent::NetworkError(e)) => {
+                println!("ERROR: Network broken: {:?}", e);
+                self.internal_state = Disconnected(NetworkError(e));
+                let now = Instant::now();
+                if now < until {
+                    thread::sleep(until - now);
                 }
+                HandleTrafficResult::Interrupt
             }
-            // TODO maybe add conditional break here, to make sure the client stays responsive on DDoS
+            None => HandleTrafficResult::Timeout,
         }
     }
 
@@ -179,13 +186,11 @@ impl ServerInterface for RemoteServerInterface {
         }
     }
 
-    fn next_tick_time(&self) -> Option<Instant> {
-        // TODO consider socket ticking
+    fn next_game_tick_time(&self) -> Option<Instant> {
         match self.internal_state {
             Connecting { resend_time } => Some(resend_time),
             Connected { ref con_state, .. } => con_state.next_tick_time(),
-            Disconnecting { force_timeout_time, .. } => Some(force_timeout_time),
-            Disconnected(_) => None,
+            Disconnecting | Disconnected(_) => None,
         }
     }
 
@@ -196,14 +201,19 @@ impl ServerInterface for RemoteServerInterface {
                 self.internal_state = Disconnected(UserDisconnect);
             },
             Connected { con_id, .. } => {
-                match self.socket.send_to_reliable(con_id, DisconnectRequest) {
-                    Ok(()) => self.internal_state = Disconnecting {
-                        force_timeout_time: Instant::now() + consts::disconnect_force_timeout()
-                    },
-                    Err(err) => self.internal_state = Disconnected(NetworkError(err)),
-                }
+                self.socket.send_to_reliable(con_id, DisconnectRequest, &mut self.event_queue);
+                self.socket.disconnect(con_id);
+                self.internal_state = Disconnecting;
             },
             _ => (),
         };
+    }
+
+    fn do_socket_tick(&mut self) {
+        self.socket.do_tick(&mut self.event_queue);
+    }
+
+    fn next_socket_tick_time(&self) -> Option<Instant> {
+        self.socket.next_tick_time()
     }
 }

@@ -102,6 +102,12 @@ impl From<UnreliableServerMessage> for ServerMessage {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snapshot {
+    tick: u64,
+    model: Model
+}
+
 impl Snapshot {
     pub fn new(tick: u64, model: &Model) -> Snapshot {
         Snapshot {
@@ -167,10 +173,4 @@ pub enum UnreliableServerMessage {
         input_tick: u64,
         arrival_tick_instant: TickInstant,
     },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Snapshot {
-    tick: u64,
-    model: Model
 }

@@ -15,7 +15,7 @@ pub const TICK_SPEED: TickRate = TickRate { per_second: 120 };
 
 // network
 pub fn ack_timeout() -> Duration {
-    Duration::from_secs(30)
+    Duration::from_secs(10)
 }
 pub const MAX_UNACKED_MESSAGES: usize = 1024;
 
