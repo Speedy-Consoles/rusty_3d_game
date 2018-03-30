@@ -228,7 +228,7 @@ impl Server {
                         match rmsg {
                             DisconnectRequest => (), // handled earlier
                         }
-                    }
+                    },
                     ConMessage::Unreliable(umsg) => {
                         match umsg {
                             InputMessage { tick, input } => {
@@ -257,7 +257,7 @@ impl Server {
                                 );
                             },
                         }
-                    }
+                    },
                 }
             },
         }

@@ -39,7 +39,7 @@ pub const NEWEST_START_TICK_TIME_WEIGHT: f64 = 0.001;
 pub const SNAPSHOT_ARRIVAL_SIGMA_FACTOR: f64 = 3.0;
 
 pub const NEWEST_START_PREDICTED_TICK_TIME_WEIGHT: f64 = 0.001;
-pub const INPUT_ARRIVAL_SIGMA_FACTOR: f64 = 4.0;
+pub const INPUT_ARRIVAL_SIGMA_FACTOR: f64 = 3.0;
 
 pub fn max_input_keep_time() -> Duration {
     Duration::from_secs(2)

@@ -180,9 +180,10 @@ impl AfterSnapshotData {
             // TODO replace this simple linear function with something more thoughtful
             speed_factor = 1.0 + float_tick_diff * factor_factor;
         } else {
-            println!("WARNING: Jumping from {} to {}!",
-                     self.tick,
-                     target_tick_instant.tick
+            println!(
+                "WARNING: Jumping from {} to {}!",
+                 self.tick,
+                 target_tick_instant.tick,
             );
             self.tick = target_tick_instant.tick;
             speed_factor = 1.0;
@@ -202,7 +203,7 @@ impl AfterSnapshotData {
         // to our ticks, to make it likely that the snapshots will be on time
         let arrival_tick_instant = TickInstant::from_start_tick(
             self.start_predicted_tick_distribution.mean()
-                + self.start_predicted_tick_distribution.sigma_dev(INPUT_ARRIVAL_SIGMA_FACTOR),
+                - self.start_predicted_tick_distribution.sigma_dev(INPUT_ARRIVAL_SIGMA_FACTOR),
             send_time,
             TICK_SPEED,
         );
@@ -215,7 +216,7 @@ impl AfterSnapshotData {
 
         let msg = InputMessage {
             tick: self.predicted_tick,
-            input: character_input
+            input: character_input,
         };
         socket.send_to_unreliable(con_id, msg, event_queue);
         self.sent_input_times.insert(self.predicted_tick, send_time);
