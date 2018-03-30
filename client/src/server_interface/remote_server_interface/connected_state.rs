@@ -83,6 +83,7 @@ impl<T> OnlineDistribution<T> where T:
 struct AfterSnapshotData {
     tick: u64,
     predicted_tick: u64,
+    predicted_tick_decrease: f64,
     tick_time: Instant,
     next_tick_time: Instant,
     model: Model,
@@ -101,6 +102,7 @@ impl AfterSnapshotData {
         AfterSnapshotData {
             tick: snapshot.tick(),
             predicted_tick: snapshot.tick(),
+            predicted_tick_decrease: 0.0,
             tick_time: recv_time - 1 / TICK_SPEED,
             next_tick_time: recv_time,
             model: Model::new(), // maybe don't initialize this yet
@@ -200,7 +202,7 @@ impl AfterSnapshotData {
         self.predicted_tick += 1;
         let send_time = Instant::now();
         // we add a multiple of the standard deviation of the input arrival time distribution
-        // to our ticks, to make it likely that the snapshots will be on time
+        // to our input ticks, to make it likely that it will be on time
         let arrival_tick_instant = TickInstant::from_start_tick(
             self.start_predicted_tick_distribution.mean()
                 - self.start_predicted_tick_distribution.sigma_dev(INPUT_ARRIVAL_SIGMA_FACTOR),
@@ -208,10 +210,19 @@ impl AfterSnapshotData {
             TICK_SPEED,
         );
         let target_predicted_tick = arrival_tick_instant.tick + 1;
+
+        let factor = 0.05;
         if target_predicted_tick >= self.predicted_tick {
+            self.predicted_tick_decrease = 0.0;
             self.predicted_tick = target_predicted_tick;
         } else {
-            self.predicted_tick -= 1; // TODO decrease in rates smaller than one (every other tick or something)
+            self.predicted_tick_decrease += (
+                (self.predicted_tick - target_predicted_tick) as f64 * factor
+            ).min(1.0);
+            if self.predicted_tick_decrease >= 1.0 {
+                self.predicted_tick -= 1;
+                self.predicted_tick_decrease -= 1.0;
+            }
         }
 
         let msg = InputMessage {
