@@ -93,13 +93,15 @@ struct Connection<AddrType: Copy> {
 }
 
 impl<AddrType: Copy> Connection<AddrType> {
-    fn on_ack(&mut self, ack: u64, resend: bool) {
+    fn on_ack(&mut self, their_ack: u64, their_resend: bool) {
         self.last_ack_time = Instant::now();
+        self.their_ack = their_ack;
+        self.their_resend = their_resend;
 
         // remove all acked messages
         loop {
             if let Some(sent_msg) = self.sent_messages.front() {
-                if sent_msg.id >= ack {
+                if sent_msg.id >= their_ack {
                     break;
                 }
             } else {
@@ -238,6 +240,7 @@ impl<
         }
         let id = self.next_connection_id;
         self.next_connection_id += 1;
+        // TODO avoid memory allocation on new connections
         self.connections.insert(id, Connection {
             addr,
             sent_messages: VecDeque::new(),
@@ -262,13 +265,14 @@ impl<
     }
 
     pub fn terminate(&mut self, con_id: ConId) {
-        if let None = self.connections.remove(&con_id) {
+        if let Some(con) = self.connections.remove(&con_id) {
+            self.con_ids_by_addr.remove(&con.addr).unwrap();
+        } else {
             println!("ERROR: Tried to disconnect non-existing connection");
         }
     }
 
-    pub fn do_tick(&mut self,
-            event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
+    pub fn do_tick(&mut self, event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
         // TODO maybe also resend?
         let now = Instant::now();
         for (&con_id, con) in self.connections.iter_mut() {
@@ -305,6 +309,7 @@ impl<
         for con_id in self.remove_connections_buffer.drain(..) {
             // TODO add info about unsent messages
             let con = self.connections.remove(&con_id).unwrap();
+            self.con_ids_by_addr.remove(&con.addr).unwrap();
             if con.disconnecting {
                 event_queue.push_back(SocketEvent::TimeoutDuringDisconnect { con_id });
             } else {
@@ -354,7 +359,8 @@ impl<
         }
 
         if buffer_full {
-            self.connections.remove(&con_id).unwrap();
+            let con = self.connections.remove(&con_id).unwrap();
+            self.con_ids_by_addr.remove(&con.addr).unwrap();
             event_queue.push_back(SocketEvent::Timeout { con_id });
         }
     }
@@ -382,15 +388,19 @@ impl<
                     &self.socket,
                 ) {
                     Ok(_) => (),
-                    Err(SendReliableError::BufferFull) => self.remove_connections_buffer.push(con_id),
-                    Err(SendReliableError::NetworkError(e))
-                            => event_queue.push_back(NetworkError(e)),
+                    Err(SendReliableError::BufferFull) => {
+                        self.remove_connections_buffer.push(con_id)
+                    },
+                    Err(SendReliableError::NetworkError(e)) => {
+                        event_queue.push_back(NetworkError(e))
+                    },
                 }
             }
         }
 
         for &con_id in self.remove_connections_buffer.iter() {
-            self.connections.remove(&con_id).unwrap();
+            let con = self.connections.remove(&con_id).unwrap();
+            self.con_ids_by_addr.remove(&con.addr).unwrap();
             event_queue.push_back(SocketEvent::Timeout { con_id });
         }
     }
@@ -463,60 +473,14 @@ impl<
                                     conful_header
                                 } => {
                                     if let Some(&con_id) = self.con_ids_by_addr.get(&addr) {
-                                        let con = self.connections.get_mut(&con_id).unwrap();
-                                        // TODO remove disconnected here
-                                        con.on_ack(their_ack, their_resend);
-                                        if con.disconnecting {
-                                            println!("DEBUG: Received connectionful message \
-                                                      from disconnecting connection!");
-                                            continue;
-                                        }
-                                        match conful_header {
-                                            ConfulHeader::Reliable(id) => {
-                                                if id == con.my_ack {
-                                                    match RecvType::Reliable
-                                                    ::unpack(payload_slice) {
-                                                        Ok(rmsg) => {
-                                                            con.my_ack += 1;
-                                                            println!(
-                                                                "DEBUG: Received reliable message!"
-                                                            );
-                                                            return Some(MessageReceived(Conful {
-                                                                con_id,
-                                                                cmsg: Reliable::<RecvType>(rmsg),
-                                                            }));
-                                                        }
-                                                        Err(e) => println!(
-                                                            "DEBUG: Received malformed message.\
-                                                             Unpack error: {:?}",
-                                                            e,
-                                                        ),
-                                                    }
-                                                } else if id > con.my_ack {
-                                                    con.my_resend = true;
-                                                    println!("DEBUG: Received early packet!");
-                                                } else {
-                                                    println!("DEBUG: Received late packet!");
-                                                }
-                                            },
-                                            ConfulHeader::Unreliable => {
-                                                match RecvType::Unreliable::unpack(payload_slice) {
-                                                    Ok(umsg) => {
-                                                        return Some(MessageReceived(
-                                                            Conful::<AddrType, RecvType> {
-                                                                con_id,
-                                                                cmsg: Unreliable::<RecvType>(umsg),
-                                                            }
-                                                        ));
-                                                    },
-                                                    Err(e) => println!(
-                                                        "DEBUG: Received malformed message. \
-                                                         Unpack error: {:?}",
-                                                        e,
-                                                    ),
-                                                }
-                                            },
-                                            ConfulHeader::Ack => (),
+                                        if let Some(event) = self.handle_conmessage(
+                                            con_id,
+                                            their_ack,
+                                            their_resend,
+                                            conful_header,
+                                            payload_slice,
+                                        ) {
+                                            return Some(event);
                                         }
                                     } else {
                                         // TODO send connection reset
@@ -540,5 +504,75 @@ impl<
                 }
             }
         }
+    }
+
+    fn handle_conmessage(&mut self, con_id: ConId, their_ack: u64, their_resend: bool,
+                         header: ConfulHeader, payload_slice: &[u8])
+            -> Option<SocketEvent<AddrType, RecvType>> {
+        {
+            let con = self.connections.get_mut(&con_id).unwrap();
+            con.on_ack(their_ack, their_resend);
+            if con.disconnecting {
+                println!("DEBUG: Received connectionful message from disconnecting connection!");
+                match header {
+                    ConfulHeader::Reliable(_) | ConfulHeader::Unreliable => {
+                        println!(
+                            "DEBUG: Received connectionful message from disconnecting connection!"
+                        );
+                    },
+                    ConfulHeader::Ack => (),
+                }
+                if !con.sent_messages.is_empty() {
+                    return None;
+                }
+            } else {
+                match header {
+                    ConfulHeader::Reliable(id) => {
+                        if id == con.my_ack {
+                            match RecvType::Reliable::unpack(payload_slice) {
+                                Ok(rmsg) => {
+                                    con.my_ack += 1;
+                                    println!("DEBUG: Received reliable message!");
+                                    return Some(MessageReceived(Conful {
+                                        con_id,
+                                        cmsg: Reliable::<RecvType>(rmsg),
+                                    }));
+                                }
+                                Err(e) => println!(
+                                    "DEBUG: Received malformed message. Unpack error: {:?}",
+                                    e,
+                                ),
+                            }
+                        } else if id > con.my_ack {
+                            con.my_resend = true;
+                            println!("DEBUG: Received early packet!");
+                        } else {
+                            println!("DEBUG: Received late packet!");
+                        }
+                    },
+                    ConfulHeader::Unreliable => {
+                        match RecvType::Unreliable::unpack(payload_slice) {
+                            Ok(umsg) => {
+                                return Some(MessageReceived(
+                                    Conful::<AddrType, RecvType> {
+                                        con_id,
+                                        cmsg: Unreliable::<RecvType>(umsg),
+                                    }
+                                ));
+                            },
+                            Err(e) => println!(
+                                "DEBUG: Received malformed message. Unpack error: {:?}", e
+                            ),
+                        }
+                    },
+                    ConfulHeader::Ack => (),
+                }
+                return None;
+            }
+        }
+
+        let con = self.connections.remove(&con_id).unwrap();
+        self.con_ids_by_addr.remove(&con.addr).unwrap();
+        Some(DoneDisconnecting(con_id))
     }
 }

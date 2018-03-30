@@ -195,6 +195,7 @@ impl Server {
                         let player_id = match con_id {
                             Some(con_id) => {
                                 // repeat confirm message
+                                // TODO what if the connection request is different from the first one?
                                 self.clients.get(&con_id).unwrap().player_id
                             },
                             None => {
