@@ -122,11 +122,6 @@ impl<AddrType: Copy> Connection<AddrType> {
             return Err(SendReliableError::BufferFull);
         }
 
-        if self.disconnecting {
-            println!("DEBUG: Tried to send message with disconnecting connection!");
-            return Ok(());
-        }
-
         let id = self.next_msg_id;
         self.next_msg_id += 1;
 
@@ -156,11 +151,6 @@ impl<AddrType: Copy> Connection<AddrType> {
         M: Message,
         S: WrappedUdpSocket<AddrType>,
     {
-        if self.disconnecting {
-            println!("DEBUG: Tried to send message with disconnecting connection!");
-            return;
-        }
-
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let header = MessageHeader::Conful {
             ack: self.my_ack,
@@ -370,6 +360,11 @@ impl<
             event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
         let mut buffer_full = false;
         if let Some(con) = self.connections.get_mut(&con_id) {
+            if con.disconnecting {
+                println!("DEBUG: Tried to send message with disconnecting connection!");
+                return;
+            }
+
             match con.send_reliable::<SendType, WrappedUdpSocketType, RecvType>(
                 msg,
                 &self.socket,
@@ -392,6 +387,11 @@ impl<
     pub fn send_to_unreliable(&mut self, con_id: ConId, msg: SendType::Unreliable,
             event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
         if let Some(con) = self.connections.get_mut(&con_id) {
+            if con.disconnecting {
+                println!("DEBUG: Tried to send message with disconnecting connection!");
+                return;
+            }
+
             con.send_unreliable::<SendType, WrappedUdpSocketType, RecvType>(
                 msg,
                 &self.socket,
@@ -443,6 +443,7 @@ impl<
         }
     }
 
+    // TODO maybe this wrapper method is not needed and we just return if the time is up
     pub fn recv_from_until<'a>(&'a mut self, until: Instant)
             -> Option<SocketEvent<AddrType, RecvType>> {
         // first make sure we read a message if there are any
@@ -459,8 +460,7 @@ impl<
 
     // reads messages until there is a valid one or an error occurs
     // time out errors are transformed into None
-    fn recv_from<'a>(&mut self, until: Option<Instant>)
-    -> Option<SocketEvent<AddrType, RecvType>> {
+    fn recv_from<'a>(&mut self, until: Option<Instant>) -> Option<SocketEvent<AddrType, RecvType>> {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         loop {
             if let Some(until) = until {
@@ -530,9 +530,14 @@ impl<
         }
     }
 
-    fn handle_conmessage(&mut self, con_id: ConId, their_ack: u64, their_resend: bool,
-                         header: ConfulHeader, payload_slice: &[u8])
-            -> Option<SocketEvent<AddrType, RecvType>> {
+    fn handle_conmessage(
+        &mut self,
+        con_id: ConId,
+        their_ack: u64,
+        their_resend: bool,
+        header: ConfulHeader,
+        payload_slice: &[u8]
+    ) -> Option<SocketEvent<AddrType, RecvType>> {
         {
             let con = self.connections.get_mut(&con_id).unwrap();
             con.on_ack(their_ack, their_resend);

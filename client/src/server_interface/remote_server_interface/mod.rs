@@ -137,6 +137,7 @@ impl ServerInterface for RemoteServerInterface {
     }
 
     fn handle_traffic(&mut self, until: Instant) -> HandleTrafficResult {
+        // TODO maybe also check if the internal state fits the events?
         match self.event_queue.pop_front().or_else(|| self.socket.recv_from_until(until)) {
             Some(SocketEvent::MessageReceived(msg)) => {
                 self.handle_message(msg);
