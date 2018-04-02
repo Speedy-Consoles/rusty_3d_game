@@ -10,6 +10,7 @@ extern crate toml;
 extern crate num;
 extern crate strum;
 #[macro_use] extern crate strum_macros;
+extern crate rand;
 
 extern crate shared;
 

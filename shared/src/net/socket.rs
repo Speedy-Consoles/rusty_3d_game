@@ -144,7 +144,6 @@ impl<AddrType: Copy> Connection<AddrType> {
             resend: self.my_resend,
             conful_header: ConfulHeader::Reliable(id),
         };
-        self.my_resend = false;
         let header_size = header.pack(&mut buf).unwrap();
         let payload_size = msg.pack(&mut buf[header_size..]).unwrap();
         let msg_size = header_size + payload_size;
@@ -154,6 +153,8 @@ impl<AddrType: Copy> Connection<AddrType> {
         data.truncate(payload_size);
         data.copy_from_slice(&buf[header_size..msg_size]);
         self.sent_messages.push_back(SentMessage { id, send_time: now, data });
+        self.my_resend = false;
+        self.last_resend_time = Some(now);
 
         Ok(())
     }
@@ -326,8 +327,13 @@ impl<
             if resend {
                 if con.their_resend {
                     println!("DEBUG: Resending to {} because of request!", con_id);
+                } else {
+                    println!(
+                        "DEBUG: Resending to {} because of resend timeout ({:?})!",
+                        con_id,
+                        resend_timeout,
+                    );
                 }
-                println!("DEBUG: Resending to {} because of resend timeout!", con_id);
                 // TODO can this get inperformant?
                 for sent_message in con.sent_messages.iter() {
                     let mut buf = [0; MAX_MESSAGE_LENGTH];
@@ -337,7 +343,8 @@ impl<
                         conful_header: ConfulHeader::Reliable(sent_message.id),
                     };
                     let header_size = header.pack(&mut buf).unwrap();
-                    buf[header_size..].copy_from_slice(&sent_message.data);
+                    let msg_size = header_size + sent_message.data.len();
+                    buf[header_size..msg_size].copy_from_slice(&sent_message.data);
                     let msg_size = header_size + sent_message.data.len();
                     if let Err(err) = self.socket.send_to(&buf[..msg_size], con.addr) {
                         event_queue.push_back(NetworkError(err));

@@ -3,7 +3,6 @@ mod socket;
 
 use std::time::Instant;
 use std::io;
-use std::net::UdpSocket;
 use std::net::SocketAddr;
 use std::thread;
 use std::collections::VecDeque;
@@ -30,7 +29,8 @@ use super::HandleTrafficResult;
 use self::connected_state::ConnectedState;
 use self::InternalState::*;
 use self::InternalDisconnectedReason::*;
-use self::socket::WrappedClientUdpSocket;
+use self::socket::ConnectedSocket;
+use self::socket::CrapNetSocket;
 
 type EventQueue = VecDeque<SocketEvent<(), ServerMessage>>;
 
@@ -55,7 +55,8 @@ enum InternalState {
     Disconnected(InternalDisconnectedReason),
 }
 
-type ClientSocket = ReliableSocket<(), ClientMessage, ServerMessage, WrappedClientUdpSocket>;
+type ClientSocket = ReliableSocket<(), ClientMessage, ServerMessage, ConnectedSocket>;
+//type ClientSocket = ReliableSocket<(), ClientMessage, ServerMessage, CrapNetSocket>;
 
 pub struct RemoteServerInterface {
     event_queue: EventQueue,
@@ -65,17 +66,11 @@ pub struct RemoteServerInterface {
 
 impl RemoteServerInterface {
     pub fn new(addr: SocketAddr) -> io::Result<RemoteServerInterface> {
-        // let the os decide over port
-        let local_addr = match addr {
-            SocketAddr::V4(_) => "0.0.0.0:0",
-            SocketAddr::V6(_) => "[::]:0",
-        };
-        let udp_socket = UdpSocket::bind(local_addr)?;
-        udp_socket.connect(addr)?;
         Ok(RemoteServerInterface {
             event_queue: EventQueue::new(),
             socket: ReliableSocket::new(
-                WrappedClientUdpSocket { udp_socket },
+                ConnectedSocket::new(addr)?,
+                //CrapNetSocket::new(addr, 0.7, 0.7)?,
                 consts::timeout_duration(),
                 consts::disconnect_force_timeout()
             ),
