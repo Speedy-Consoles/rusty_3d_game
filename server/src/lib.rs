@@ -18,6 +18,7 @@ use shared::consts::TICK_SPEED;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::tick_time::TickInstant;
+use shared::net::socket::ConnectionEndReason;
 use shared::net::socket::SocketEvent;
 use shared::net::socket::ConId;
 use shared::net::socket::CheckedMessage;
@@ -156,16 +157,29 @@ impl Server {
             );
             match event {
                 Some(SocketEvent::MessageReceived(msg)) => self.handle_message(msg),
-                Some(SocketEvent::Timeout { con_id }) | Some(SocketEvent::ConReset { con_id }) => {
-                    println!("DEBUG: {} timed out!", con_id);
-                    self.remove_client(con_id)
-                },
                 Some(SocketEvent::DoneDisconnecting(con_id)) => {
                     println!("DEBUG: {} disconnected gracefully!", con_id);
                 }
-                Some(SocketEvent::TimeoutDuringDisconnect { con_id })
-                | Some(SocketEvent::ConResetDuringDisconnect { con_id }) => {
-                    println!("DEBUG: {} timed out during disconnect!", con_id);
+                Some(SocketEvent::ConnectionEnd { reason, con_id }) => {
+                    match reason {
+                        ConnectionEndReason::TimedOut => {
+                            println!("DEBUG: {} timed out!", con_id);
+                        },
+                        ConnectionEndReason::Reset => {
+                            println!("DEBUG: {} sent connection reset!", con_id);
+                        },
+                    }
+                    self.remove_client(con_id)
+                },
+                Some(SocketEvent::DisconnectingConnectionEnd { reason, con_id }) => {
+                    match reason {
+                        ConnectionEndReason::TimedOut => {
+                            println!("DEBUG: {} timed out during disconnect!", con_id);
+                        },
+                        ConnectionEndReason::Reset => {
+                            println!("DEBUG: {} sent connection reset during disconnect!", con_id);
+                        },
+                    }
                 },
                 Some(SocketEvent::NetworkError(e)) => {
                     println!("ERROR: Network broken: {:?}", e);

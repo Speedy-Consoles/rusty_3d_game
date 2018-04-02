@@ -21,6 +21,7 @@ use online_distribution::OnlineDistribution;
 use self::SocketEvent::*;
 use self::CheckedMessage::*;
 use self::ConMessage::*;
+use self::ConnectionEndReason::*;
 
 pub trait WrappedUdpSocket<AddrType>: Sized {
     fn send_to(&self, buf: &[u8], addr: AddrType) -> io::Result<usize>;
@@ -29,22 +30,21 @@ pub trait WrappedUdpSocket<AddrType>: Sized {
     fn set_read_timeout(&self, Option<Duration>) -> io::Result<()>;
 }
 
+pub enum ConnectionEndReason {
+    TimedOut,
+    Reset,
+}
+
 pub enum SocketEvent<AddrType, RecvType: Message> {
     MessageReceived(CheckedMessage<AddrType, RecvType>),
     DoneDisconnecting(u64),
-    TimeoutDuringDisconnect {
+    DisconnectingConnectionEnd {
+        reason: ConnectionEndReason,
         con_id: u64,
         // TODO unacked messages
     },
-    Timeout {
-        con_id: u64,
-        // TODO unacked messages
-    },
-    ConReset {
-        con_id: u64,
-        // TODO unacked messages
-    },
-    ConResetDuringDisconnect {
+    ConnectionEnd {
+        reason: ConnectionEndReason,
         con_id: u64,
         // TODO unacked messages
     },
@@ -353,9 +353,15 @@ impl<
             let con = self.connections.remove(&con_id).unwrap();
             self.con_ids_by_addr.remove(&con.addr).unwrap();
             if con.disconnecting {
-                event_queue.push_back(SocketEvent::TimeoutDuringDisconnect { con_id });
+                event_queue.push_back(SocketEvent::DisconnectingConnectionEnd {
+                    reason: TimedOut,
+                    con_id,
+                });
             } else {
-                event_queue.push_back(SocketEvent::Timeout { con_id });
+                event_queue.push_back(SocketEvent::ConnectionEnd {
+                    reason: TimedOut,
+                    con_id,
+                });
             }
         }
 
@@ -408,7 +414,10 @@ impl<
         if buffer_full {
             let con = self.connections.remove(&con_id).unwrap();
             self.con_ids_by_addr.remove(&con.addr).unwrap();
-            event_queue.push_back(SocketEvent::Timeout { con_id });
+            event_queue.push_back(SocketEvent::ConnectionEnd {
+                reason: TimedOut,
+                con_id,
+            });
         }
     }
 
@@ -453,7 +462,10 @@ impl<
         for &con_id in self.remove_connections_buffer.iter() {
             let con = self.connections.remove(&con_id).unwrap();
             self.con_ids_by_addr.remove(&con.addr).unwrap();
-            event_queue.push_back(SocketEvent::Timeout { con_id });
+            event_queue.push_back(SocketEvent::ConnectionEnd {
+                reason: TimedOut,
+                con_id
+            });
         }
     }
 
@@ -552,9 +564,15 @@ impl<
                                     if let Some(con_id) = self.con_ids_by_addr.remove(&addr) {
                                         let con = self.connections.remove(&con_id).unwrap();
                                         if con.disconnecting {
-                                            return Some(ConResetDuringDisconnect { con_id });
+                                            return Some(DisconnectingConnectionEnd {
+                                                reason: Reset,
+                                                con_id,
+                                            });
                                         } else {
-                                            return Some(ConReset { con_id });
+                                            return Some(ConnectionEnd {
+                                                reason: Reset,
+                                                con_id,
+                                            });
                                         }
                                     }
                                 },

@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 
 use shared::model::world::character::CharacterInput;
 use shared::consts;
+use shared::net::socket::ConnectionEndReason;
 use shared::net::socket::SocketEvent;
 use shared::net::socket::ConId;
 use shared::net::socket::ReliableSocket;
@@ -148,15 +149,28 @@ impl ServerInterface for RemoteServerInterface {
                 self.internal_state = Disconnected(UserDisconnect);
                 HandleTrafficResult::Interrupt
             },
-            Some(SocketEvent::Timeout { .. }) | Some(SocketEvent::ConReset { .. }) => {
-                println!("DEBUG: Timed out!");
+            Some(SocketEvent::ConnectionEnd { reason, .. })  => {
+                match reason {
+                    ConnectionEndReason::TimedOut => {
+                        println!("DEBUG: Timed out!");
+                    },
+                    ConnectionEndReason::Reset => {
+                        println!("DEBUG: Connection reset!");
+                    },
+                }
                 // TODO inform about unsent messages
                 self.internal_state = Disconnected(TimedOut);
                 HandleTrafficResult::Interrupt
             },
-            Some(SocketEvent::TimeoutDuringDisconnect { .. })
-            | Some(SocketEvent::ConResetDuringDisconnect { .. }) => {
-                println!("DEBUG: Timed out during disconnect!");
+            Some(SocketEvent::DisconnectingConnectionEnd { reason, .. }) => {
+                match reason {
+                    ConnectionEndReason::TimedOut => {
+                        println!("DEBUG: Timed out during disconnect!");
+                    },
+                    ConnectionEndReason::Reset => {
+                        println!("DEBUG: Connection reset during disconnect!");
+                    },
+                }
                 // TODO inform about unsent messages
                 self.internal_state = Disconnected(UserDisconnect);
                 HandleTrafficResult::Interrupt
