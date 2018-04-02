@@ -84,6 +84,7 @@ impl AfterSnapshotData {
             start_tick_time,
             NEWEST_START_TICK_TIME_WEIGHT
         );
+        // TODO ignore snapshots with insanely high tick
         if snapshot.tick() > self.oldest_snapshot_tick {
             self.snapshots.insert(snapshot.tick(), snapshot);
         } else {
@@ -252,6 +253,8 @@ impl ConnectedState {
 
     pub fn do_tick(&mut self, character_input: CharacterInput, socket: &mut ClientSocket,
                    con_id: ConId, event_queue: &mut EventQueue) {
+        // TODO check if server is not sending snapshots
+        // TODO check if server is not acking input
         if let Some(ref mut data) = self.after_snapshot_data {
             data.update_tick();
             data.send_and_save_input(character_input, socket, con_id, event_queue);

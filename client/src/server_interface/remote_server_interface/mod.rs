@@ -148,16 +148,17 @@ impl ServerInterface for RemoteServerInterface {
                 self.internal_state = Disconnected(UserDisconnect);
                 HandleTrafficResult::Interrupt
             },
-            Some(SocketEvent::TimeoutDuringDisconnect { .. }) => {
-                println!("DEBUG: Timed out during disconnect!");
-                // TODO inform about unsent messages
-                self.internal_state = Disconnected(UserDisconnect);
-                HandleTrafficResult::Interrupt
-            },
             Some(SocketEvent::Timeout { .. }) | Some(SocketEvent::ConReset { .. }) => {
                 println!("DEBUG: Timed out!");
                 // TODO inform about unsent messages
                 self.internal_state = Disconnected(TimedOut);
+                HandleTrafficResult::Interrupt
+            },
+            Some(SocketEvent::TimeoutDuringDisconnect { .. })
+            | Some(SocketEvent::ConResetDuringDisconnect { .. }) => {
+                println!("DEBUG: Timed out during disconnect!");
+                // TODO inform about unsent messages
+                self.internal_state = Disconnected(UserDisconnect);
                 HandleTrafficResult::Interrupt
             },
             Some(SocketEvent::NetworkError(e)) => {

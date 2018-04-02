@@ -94,6 +94,9 @@ impl Server {
 
         // main loop
         while !self.closing { // TODO add way to exit
+
+            // TODO check if clients are not acking snapshots
+
             // socket tick
             if let Some(next_socket_tick_time) = self.socket.next_tick_time() {
                 let before_tick = Instant::now();
@@ -120,7 +123,7 @@ impl Server {
                 }
                 self.model.do_tick();
                 let msg = SnapshotMessage(Snapshot::new(self.tick, &self.model));
-                self.socket.broadcast_unreliable(msg, &mut self.event_queue); // TODO remove unwrap
+                self.socket.broadcast_unreliable(msg, &mut self.event_queue);
                 tick_counter += 1;
 
                 // display tick rate
@@ -160,7 +163,8 @@ impl Server {
                 Some(SocketEvent::DoneDisconnecting(con_id)) => {
                     println!("DEBUG: {} disconnected gracefully!", con_id);
                 }
-                Some(SocketEvent::TimeoutDuringDisconnect { con_id }) => {
+                Some(SocketEvent::TimeoutDuringDisconnect { con_id })
+                | Some(SocketEvent::ConResetDuringDisconnect { con_id }) => {
                     println!("DEBUG: {} timed out during disconnect!", con_id);
                 },
                 Some(SocketEvent::NetworkError(e)) => {

@@ -44,6 +44,10 @@ pub enum SocketEvent<AddrType, RecvType: Message> {
         con_id: u64,
         // TODO unacked messages
     },
+    ConResetDuringDisconnect {
+        con_id: u64,
+        // TODO unacked messages
+    },
     // TODO when can an io error occur? Is the network completely broken after that?
     NetworkError(io::Error),
 }
@@ -202,6 +206,7 @@ enum MessageHeader {
         resend: bool,
         conful_header: ConfulHeader,
     },
+    ConReset,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -530,9 +535,27 @@ impl<
                                             return Some(event);
                                         }
                                     } else {
-                                        // TODO send connection reset
+                                        let mut buf = [0; MAX_MESSAGE_LENGTH];
+                                        let header = MessageHeader::ConReset;
+                                        let header_size = header.pack(&mut buf).unwrap();
+                                        if let Err(err) = self.socket.send_to(
+                                            &buf[..header_size],
+                                            addr
+                                        ) {
+                                            return Some(NetworkError(err));
+                                        }
                                         println!("DEBUG: Received connectionful message \
                                                   from unknown host!");
+                                    }
+                                },
+                                MessageHeader::ConReset => {
+                                    if let Some(con_id) = self.con_ids_by_addr.remove(&addr) {
+                                        let con = self.connections.remove(&con_id).unwrap();
+                                        if con.disconnecting {
+                                            return Some(ConResetDuringDisconnect { con_id });
+                                        } else {
+                                            return Some(ConReset { con_id });
+                                        }
                                     }
                                 },
                             }
