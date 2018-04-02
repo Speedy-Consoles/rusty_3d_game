@@ -13,7 +13,10 @@ use arrayvec::ArrayVec;
 use net::MAX_MESSAGE_LENGTH;
 use net::Packable;
 use net::Message;
+use consts;
 use consts::MAX_UNACKED_MESSAGES;
+use consts::ACK_DURATION_SIGMA_FACTOR;
+use online_distribution::OnlineDistribution;
 
 use self::SocketEvent::*;
 use self::CheckedMessage::*;
@@ -77,18 +80,21 @@ impl From<io::Error> for SendReliableError {
 
 struct SentMessage {
     id: u64,
+    send_time: Instant,
     data: ArrayVec<[u8; MAX_MESSAGE_LENGTH]>,
 }
 
 struct Connection<AddrType: Copy> {
     addr: AddrType,
     sent_messages: VecDeque<SentMessage>, // TODO use byte buffer instead
+    ack_distribution: OnlineDistribution<Duration>,
     next_msg_id: u64,
     my_ack: u64,
     my_resend: bool,
     their_ack: u64,
     their_resend: bool,
     last_recv_time: Instant,
+    last_resend_time: Option<Instant>,
     disconnecting: bool,
 }
 
@@ -108,6 +114,7 @@ impl<AddrType: Copy> Connection<AddrType> {
                 break;
             }
             self.sent_messages.pop_front().unwrap();
+            self.last_resend_time = None;
         }
     }
 
@@ -121,6 +128,8 @@ impl<AddrType: Copy> Connection<AddrType> {
             println!("DEBUG: Maximum number of unacked messages reached!");
             return Err(SendReliableError::BufferFull);
         }
+
+        let now = Instant::now();
 
         let id = self.next_msg_id;
         self.next_msg_id += 1;
@@ -140,7 +149,7 @@ impl<AddrType: Copy> Connection<AddrType> {
         let mut data: ArrayVec<[u8; MAX_MESSAGE_LENGTH]> = iter::repeat(0).collect();
         data.truncate(payload_size);
         data.copy_from_slice(&buf[header_size..msg_size]);
-        self.sent_messages.push_back(SentMessage { id, data });
+        self.sent_messages.push_back(SentMessage { id, send_time: now, data });
 
         Ok(())
     }
@@ -252,12 +261,14 @@ impl<
         self.connections.insert(id, Connection {
             addr,
             sent_messages: VecDeque::new(),
+            ack_distribution: OnlineDistribution::new(consts::initial_ack_duration_guess()),
             next_msg_id: 0,
             my_ack: 0,
             my_resend: false,
             their_ack: 0,
             their_resend: false,
             last_recv_time: Instant::now(),
+            last_resend_time: None,
             disconnecting: false,
         });
         self.con_ids_by_addr.insert(addr, id);
@@ -287,20 +298,31 @@ impl<
         let now = Instant::now();
         for (&con_id, con) in self.connections.iter_mut() {
             // check if didn't hear anything for too long
-            let recv_silence = now - con.last_recv_time;
-            let timed_out = if con.disconnecting {
-                recv_silence > self.timeout_duration_disconnecting
-            } else {
-                recv_silence > self.timeout_duration
-            };
-            if timed_out {
-                self.remove_connections_buffer.push(con_id);
-                continue;
+            if let Some(&SentMessage { send_time, .. }) = con.sent_messages.front() {
+                let ack_silence = now - send_time;
+                let timed_out = if con.disconnecting {
+                    ack_silence > self.timeout_duration_disconnecting
+                } else {
+                    ack_silence > self.timeout_duration
+                };
+                if timed_out {
+                    self.remove_connections_buffer.push(con_id);
+                    continue;
+                }
             }
 
-            // resend all not acked messages, if requested
-            // TODO also resend if ack is low for too long
-            if con.their_resend {
+            // resend if ack is low for too long or if requested
+            let resend_timeout = con.ack_distribution.mean()
+                    + con.ack_distribution.sigma_dev(ACK_DURATION_SIGMA_FACTOR);
+            let mut resend = con.their_resend;
+            if let Some(last_resend_time) = con.last_resend_time {
+                resend |= now > last_resend_time + resend_timeout;
+            }
+            if resend {
+                if con.their_resend {
+                    println!("DEBUG: Resending to {} because of request!", con_id);
+                }
+                println!("DEBUG: Resending to {} because of resend timeout!", con_id);
                 // TODO can this get inperformant?
                 for sent_message in con.sent_messages.iter() {
                     let mut buf = [0; MAX_MESSAGE_LENGTH];
@@ -316,6 +338,7 @@ impl<
                         event_queue.push_back(NetworkError(err));
                     }
                 }
+                con.last_resend_time = Some(now);
                 con.their_resend = false;
             }
         }

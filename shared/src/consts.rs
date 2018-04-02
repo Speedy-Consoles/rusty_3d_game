@@ -18,6 +18,11 @@ pub fn timeout_duration() -> Duration {
     Duration::from_secs(10)
 }
 pub const MAX_UNACKED_MESSAGES: usize = 1024;
+pub fn initial_ack_duration_guess() -> Duration {
+    Duration::new(0, 50000000)
+}
+pub const NEWEST_ACK_DURATION_WEIGHT: f64 = 0.001;
+pub const ACK_DURATION_SIGMA_FACTOR: f64 = 3.0;
 
 // CLIENT
 

@@ -4,6 +4,7 @@ pub mod util;
 pub mod model;
 pub mod net;
 pub mod tick_time;
+pub mod online_distribution;
 
 #[macro_use] extern crate macro_attr;
 #[macro_use] extern crate newtype_derive;

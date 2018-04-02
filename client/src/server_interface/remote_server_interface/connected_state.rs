@@ -1,9 +1,6 @@
 use std::time::Instant;
-use std::time::Duration;
 use std::collections::HashMap;
 use std::iter;
-use std::ops::Sub;
-use std::ops::Add;
 
 use shared::tick_time::TickInstant;
 use shared::tick_time::TickRate;
@@ -24,61 +21,12 @@ use shared::consts::SNAPSHOT_ARRIVAL_SIGMA_FACTOR;
 use shared::consts::NEWEST_START_PREDICTED_TICK_TIME_WEIGHT;
 use shared::consts::INPUT_ARRIVAL_SIGMA_FACTOR;
 use shared::util;
-use shared::util::Mix;
+use shared::online_distribution::OnlineDistribution;
 
 use server_interface::remote_server_interface::ClientSocket;
 use server_interface::ConnectionState;
 
 use super::EventQueue;
-
-struct OnlineDistribution<T> where T:
-        Copy
-        + PartialOrd
-        + Mix
-        + Sub<T, Output=Duration>
-        + Add<Duration, Output=T> {
-
-    mean: T,
-    variance: f64,
-}
-
-impl<T> OnlineDistribution<T> where T:
-        Copy
-        + PartialOrd
-        + Mix
-        + Sub<T, Output=Duration>
-        + Add<Duration, Output=T> {
-
-    fn new(sample: T) -> OnlineDistribution<T> {
-        OnlineDistribution {
-            mean: sample,
-            variance: 0.0,
-        }
-    }
-
-    fn add_sample(&mut self, sample: T, weight: f64) {
-        let old_diff = if sample > self.mean {
-            util::duration_as_float(sample - self.mean)
-        } else {
-            -util::duration_as_float(self.mean - sample)
-        };
-        self.mean = self.mean.mix(&sample, weight);
-        let new_diff = if sample > self.mean {
-            util::duration_as_float(sample - self.mean)
-        } else {
-            -util::duration_as_float(self.mean - sample)
-        };
-        self.variance = self.variance.mix(&(old_diff * new_diff), weight);
-    }
-
-    fn mean(&self) -> T {
-        self.mean
-    }
-
-    fn sigma_dev(&self, sigma_factor: f64) -> Duration {
-        util::duration_from_float(self.variance.sqrt() * sigma_factor)
-    }
-}
 
 struct AfterSnapshotData {
     tick: u64,
