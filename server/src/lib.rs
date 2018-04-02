@@ -219,6 +219,11 @@ impl Server {
                             &mut self.event_queue,
                         );
                     },
+                    ConnectionAbort => {
+                        if let Some(con_id) = con_id {
+                            self.remove_client(con_id);
+                        }
+                    },
                 }
             },
             CheckedMessage::Conful { con_id, cmsg } => {

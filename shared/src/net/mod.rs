@@ -144,6 +144,7 @@ impl PartialOrd for Snapshot {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ConlessClientMessage {
     ConnectionRequest,
+    ConnectionAbort,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

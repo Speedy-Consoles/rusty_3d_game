@@ -198,7 +198,7 @@ impl ServerInterface for RemoteServerInterface {
     fn disconnect(&mut self) {
         match self.internal_state {
             Connecting { .. } => {
-                // TODO send some disconnection message
+                self.socket.send_to_conless((), ConnectionAbort, &mut self.event_queue);
                 self.internal_state = Disconnected(UserDisconnect);
             },
             Connected { con_id, .. } => {
