@@ -1,6 +1,7 @@
 use std::io;
 use std::net::UdpSocket;
 use std::net::SocketAddr;
+use std::time::Instant;
 use std::time::Duration;
 
 use rand;
@@ -28,19 +29,19 @@ impl ConnectedSocket {
 }
 
 impl WrappedUdpSocket<()> for ConnectedSocket {
-    fn send_to(&self, buf: &[u8], _addr: ()) -> io::Result<usize> {
+    fn send_to(&mut self, buf: &[u8], _addr: ()) -> io::Result<usize> {
         self.socket.send(buf)
     }
 
-    fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, ())> {
+    fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, ())> {
         self.socket.recv(buf).map(|read| (read, ()))
     }
 
-    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+    fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
         self.socket.set_nonblocking(nonblocking)
     }
 
-    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
         self.socket.set_read_timeout(timeout)
     }
 }
@@ -50,6 +51,7 @@ pub struct CrapNetSocket {
     send_drop_chance: f64,
     recv_drop_chance: f64,
     distribution: Gamma,
+    read_timeout: Option<Duration>,
 }
 
 impl CrapNetSocket {
@@ -63,12 +65,13 @@ impl CrapNetSocket {
             send_drop_chance,
             recv_drop_chance,
             distribution: Gamma::new(0.5, 0.5), // TODO
+            read_timeout: None,
         })
     }
 }
 
 impl WrappedUdpSocket<()> for CrapNetSocket {
-    fn send_to(&self, buf: &[u8], addr: ()) -> io::Result<usize> {
+    fn send_to(&mut self, buf: &[u8], addr: ()) -> io::Result<usize> {
         // TODO delay messages
         let mut rng = rand::thread_rng();
         if rng.gen_range(0.0, 1.0) > self.send_drop_chance {
@@ -77,16 +80,35 @@ impl WrappedUdpSocket<()> for CrapNetSocket {
         Ok(buf.len())
     }
 
-    fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, ())> {
-        // TODO drop and delay messages
-        self.socket.recv_from(buf)
+    fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, ())> {
+        // TODO delay messages
+        let mut rng = rand::thread_rng();
+        let mut result;
+        let until = self.read_timeout.map(|t| Instant::now() + t);
+        loop {
+            result = self.socket.recv_from(buf);
+            if result.is_err() {
+                break;
+            } else if rng.gen_range(0.0, 1.0) > self.recv_drop_chance {
+                break;
+            } else if let Some(until) = until {
+                let now = Instant::now();
+                if until > now {
+                    self.socket.set_read_timeout(Some(until - now))?;
+                }
+            }
+        }
+        self.socket.set_read_timeout(self.read_timeout)?;
+
+        result
     }
 
-    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+    fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
         self.socket.set_nonblocking(nonblocking)
     }
 
-    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        self.read_timeout = timeout;
         self.socket.set_read_timeout(timeout)
     }
 }

@@ -24,10 +24,10 @@ use self::ConMessage::*;
 use self::ConnectionEndReason::*;
 
 pub trait WrappedUdpSocket<AddrType>: Sized {
-    fn send_to(&self, buf: &[u8], addr: AddrType) -> io::Result<usize>;
-    fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, AddrType)>;
-    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()>;
-    fn set_read_timeout(&self, Option<Duration>) -> io::Result<()>;
+    fn send_to(&mut self, buf: &[u8], addr: AddrType) -> io::Result<usize>;
+    fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, AddrType)>;
+    fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()>;
+    fn set_read_timeout(&mut self, Option<Duration>) -> io::Result<()>;
 }
 
 pub enum ConnectionEndReason {
@@ -122,7 +122,7 @@ impl<AddrType: Copy> Connection<AddrType> {
         }
     }
 
-    fn send_reliable<M, S, T: Message>(&mut self, msg: M::Reliable, socket: &S)
+    fn send_reliable<M, S, T: Message>(&mut self, msg: M::Reliable, socket: &mut S)
         -> Result<(), SendReliableError>
     where
         M: Message,
@@ -159,7 +159,7 @@ impl<AddrType: Copy> Connection<AddrType> {
         Ok(())
     }
 
-    fn send_unreliable<M, S, RecvType: Message>(&mut self, msg: M::Unreliable, socket: &S,
+    fn send_unreliable<M, S, RecvType: Message>(&mut self, msg: M::Unreliable, socket: &mut S,
         event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>)
     where
         M: Message,
@@ -180,7 +180,7 @@ impl<AddrType: Copy> Connection<AddrType> {
         }
     }
 
-    fn send_ack<S, RecvType: Message>(&mut self, socket: &S,
+    fn send_ack<S, RecvType: Message>(&mut self, socket: &mut S,
         event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>)
     where
         S: WrappedUdpSocket<AddrType>,
@@ -293,7 +293,7 @@ impl<
                      event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
         if let Some(mut con) = self.connections.remove(&con_id) {
             self.con_ids_by_addr.remove(&con.addr).unwrap();
-            con.send_ack(&self.socket, event_queue);
+            con.send_ack(&mut self.socket, event_queue);
         } else {
             println!("ERROR: Tried to disconnect non-existing connection");
         }
@@ -385,7 +385,7 @@ impl<
         }
     }
 
-    pub fn send_to_conless(&self, addr: AddrType, msg: SendType::Conless,
+    pub fn send_to_conless(&mut self, addr: AddrType, msg: SendType::Conless,
             event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let header = MessageHeader::Conless;
@@ -408,7 +408,7 @@ impl<
 
             match con.send_reliable::<SendType, WrappedUdpSocketType, RecvType>(
                 msg,
-                &self.socket,
+                &mut self.socket,
             ) {
                 Ok(_) => (),
                 Err(SendReliableError::BufferFull) => buffer_full = true,
@@ -438,7 +438,7 @@ impl<
 
             con.send_unreliable::<SendType, WrappedUdpSocketType, RecvType>(
                 msg,
-                &self.socket,
+                &mut self.socket,
                 event_queue,
             );
         } else {
@@ -453,7 +453,7 @@ impl<
                 // TODO pack here
                 match con.send_reliable::<SendType, WrappedUdpSocketType, RecvType>(
                     msg.clone(),
-                    &self.socket,
+                    &mut self.socket,
                 ) {
                     Ok(_) => (),
                     Err(SendReliableError::BufferFull) => {
@@ -483,7 +483,7 @@ impl<
                 // TODO pack here
                 con.send_unreliable::<SendType, WrappedUdpSocketType, RecvType>(
                     msg.clone(),
-                    &self.socket,
+                    &mut self.socket,
                     event_queue,
                 );
             }
