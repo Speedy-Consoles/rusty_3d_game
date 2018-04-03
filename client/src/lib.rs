@@ -11,6 +11,7 @@ extern crate num;
 extern crate strum;
 #[macro_use] extern crate strum_macros;
 extern crate rand;
+extern crate arrayvec;
 
 extern crate shared;
 
@@ -190,7 +191,11 @@ impl Client {
                         draw_counter += 1;
                     }
                     if let Some(mut next_graphics_tick) = next_draw_time {
-                        let draw_tick_diff = (next_graphics_tick.elapsed() * DRAW_SPEED).ticks;
+                        let draw_tick_diff = if Instant::now() < next_graphics_tick {
+                            0
+                        } else {
+                            (next_graphics_tick.elapsed() * DRAW_SPEED).ticks
+                        };
                         next_graphics_tick += (draw_tick_diff + 1) / DRAW_SPEED;
                         next_draw_time = Some(next_graphics_tick);
                     }
