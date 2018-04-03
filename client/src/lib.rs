@@ -191,10 +191,11 @@ impl Client {
                         draw_counter += 1;
                     }
                     if let Some(mut next_graphics_tick) = next_draw_time {
-                        let draw_tick_diff = if Instant::now() < next_graphics_tick {
+                        let now = Instant::now();
+                        let draw_tick_diff = if now < next_graphics_tick {
                             0
                         } else {
-                            (next_graphics_tick.elapsed() * DRAW_SPEED).ticks
+                            ((now - next_graphics_tick) * DRAW_SPEED).ticks
                         };
                         next_graphics_tick += (draw_tick_diff + 1) / DRAW_SPEED;
                         next_draw_time = Some(next_graphics_tick);
