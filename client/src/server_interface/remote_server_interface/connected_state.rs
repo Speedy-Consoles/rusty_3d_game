@@ -178,6 +178,7 @@ impl AfterSnapshotData {
             tick: self.predicted_tick,
             input: character_input,
         };
+        // TODO if we resend any input, the server will send another ack and we might calculate a wrong input delay
         socket.send_to_unreliable(con_id, msg, event_queue);
         self.sent_input_times.insert(self.predicted_tick, send_time);
         self.sent_inputs.insert(self.predicted_tick, character_input);

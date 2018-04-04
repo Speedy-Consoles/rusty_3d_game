@@ -12,6 +12,8 @@ where T: Copy + PartialOrd + Mix + Sub<T, Output=Duration> + Add<Duration, Outpu
     variance: f64,
 }
 
+// TODO the online distribution does not calculate the distribution from CrapNet
+
 impl<T> OnlineDistribution<T>
 where T: Copy + PartialOrd + Mix + Sub<T, Output=Duration> + Add<Duration, Output=T>
 {
