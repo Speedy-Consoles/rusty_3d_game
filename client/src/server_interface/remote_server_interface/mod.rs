@@ -70,9 +70,10 @@ impl RemoteServerInterface {
             event_queue: EventQueue::new(),
             socket: ReliableSocket::new(
                 ConnectedSocket::new(addr)?,
-                //CrapNetSocket::new(addr, 0.1, 0.01, 0.2, 0.1, 0.01, 0.2)?,
+                //CrapNetSocket::new(addr, 0.5, 0.5, 0.3, 0.5, 0.5, 0.3)?,
                 consts::timeout_duration(),
-                consts::disconnect_force_timeout()
+                consts::disconnect_force_timeout(),
+                false,
             ),
             internal_state: Connecting {
                 resend_time: Instant::now(),

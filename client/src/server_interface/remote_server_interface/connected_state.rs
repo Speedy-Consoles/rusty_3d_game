@@ -72,7 +72,7 @@ impl AfterSnapshotData {
             if start_tick_time > limit {
                 let diff = start_tick_time - self.start_tick_time_distribution.mean();
                 println!(
-                    "WARNING: Snapshot {} arrived too late! | \
+                    "DEBUG: Snapshot {} arrived too late! | \
                         Deviation from mean: {:.2}ms | Tick tolerance delay: {:.2}ms",
                     snapshot.tick(),
                     util::duration_as_float(diff) * 1000.0,
@@ -88,7 +88,7 @@ impl AfterSnapshotData {
         if snapshot.tick() > self.oldest_snapshot_tick {
             self.snapshots.insert(snapshot.tick(), snapshot);
         } else {
-            println!("WARNING: Discarded snapshot {}!", snapshot.tick());
+            println!("DEBUG: Discarded snapshot {}!", snapshot.tick());
         }
     }
 
@@ -132,7 +132,7 @@ impl AfterSnapshotData {
             speed_factor = 1.0 + float_tick_diff * factor_factor;
         } else {
             println!(
-                "WARNING: Jumping from {} to {}!",
+                "DEBUG: Jumping from {} to {}!",
                  self.tick,
                  target_tick_instant.tick,
             );
@@ -197,7 +197,7 @@ impl AfterSnapshotData {
         for t in self.oldest_snapshot_tick..new_oldest_snapshot_tick {
             let snapshot = self.snapshots.remove(&t);
             if snapshot.is_none() {
-                println!("WARNING: Snapshot {} was never seen!", t);
+                println!("DEBUG: Snapshot {} was never seen!", t);
             }
         }
         for t in (self.oldest_snapshot_tick + 1)..(new_oldest_snapshot_tick + 1) {
@@ -214,7 +214,7 @@ impl AfterSnapshotData {
         let tick_diff = self.tick - self.oldest_snapshot_tick;
         if tick_diff > 0 {
             println!(
-                "WARNING: {} ticks ahead of snapshots! | \
+                "DEBUG: {} ticks ahead of snapshots! | \
                         Current tick: {} | Tick of oldest snapshot: {}",
                 tick_diff,
                 self.tick,

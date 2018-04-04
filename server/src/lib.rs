@@ -72,6 +72,7 @@ impl Server {
                 wrapped_socket,
                 consts::timeout_duration(),
                 consts::timeout_duration(),
+                true,
             ),
             event_queue: EventQueue::new(),
             clients: HashMap::new(),

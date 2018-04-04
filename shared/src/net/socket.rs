@@ -224,6 +224,7 @@ pub struct ReliableSocket<
     WrappedUdpSocketType: WrappedUdpSocket<AddrType>
 > {
     next_connection_id: ConId,
+    send_con_reset: bool,
     connections: HashMap<ConId, Connection<AddrType>>, // TODO consider making this an array
     remove_connections_buffer: Vec<ConId>,
     con_ids_by_addr: HashMap<AddrType, ConId>, // TODO consider replacing this by linear search
@@ -242,9 +243,10 @@ impl<
     WrappedUdpSocketType: WrappedUdpSocket<AddrType>
 > ReliableSocket<AddrType, SendType, RecvType, WrappedUdpSocketType> {
     pub fn new(wrapped_udp_socket: WrappedUdpSocketType, ack_timeout: Duration,
-               ack_timeout_disconnecting: Duration) -> Self {
+               ack_timeout_disconnecting: Duration, send_con_reset: bool) -> Self {
         ReliableSocket {
             next_connection_id: 0,
+            send_con_reset,
             connections: HashMap::new(),
             remove_connections_buffer: Vec::new(),
             con_ids_by_addr: HashMap::new(),
@@ -554,17 +556,19 @@ impl<
                                             return Some(event);
                                         }
                                     } else {
-                                        let mut buf = [0; MAX_MESSAGE_LENGTH];
-                                        let header = MessageHeader::ConReset;
-                                        let header_size = header.pack(&mut buf).unwrap();
-                                        if let Err(err) = self.socket.send_to(
-                                            &buf[..header_size],
-                                            addr
-                                        ) {
-                                            return Some(NetworkError(err));
-                                        }
                                         println!("DEBUG: Received connectionful message \
                                                   from unknown host!");
+                                        if self.send_con_reset {
+                                            let mut buf = [0; MAX_MESSAGE_LENGTH];
+                                            let header = MessageHeader::ConReset;
+                                            let header_size = header.pack(&mut buf).unwrap();
+                                            if let Err(err) = self.socket.send_to(
+                                                &buf[..header_size],
+                                                addr
+                                            ) {
+                                                return Some(NetworkError(err));
+                                            }
+                                        }
                                     }
                                 },
                                 MessageHeader::ConReset => {
