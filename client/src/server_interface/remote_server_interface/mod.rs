@@ -70,7 +70,7 @@ impl RemoteServerInterface {
             event_queue: EventQueue::new(),
             socket: ReliableSocket::new(
                 ConnectedSocket::new(addr)?,
-                //CrapNetSocket::new(addr, 0.5, 0.5, 0.3, 0.5, 0.5, 0.3)?,
+                //CrapNetSocket::new(addr, 0.7, 0.7, 0.0, 0.7, 0.7, 0.0)?,
                 consts::timeout_duration(),
                 consts::disconnect_force_timeout(),
                 false,

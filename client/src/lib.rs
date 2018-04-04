@@ -158,12 +158,7 @@ impl Client {
             match tick_target {
                 GameTick => {
                     let mut character_input = self.character_input;
-                    if self.menu.active() {
-                        character_input = Default::default();
-                        character_input.view_dir = self.character_input.view_dir;
-                    }
                     self.server_interface.do_tick(character_input);
-                    self.character_input.reset_flags();
                     tick_counter += 1;
                 },
                 SocketTick => self.server_interface.do_socket_tick(),
@@ -280,13 +275,14 @@ impl Client {
         use controls::ControlEvent::*;
         use controls::SwitchState::*;
 
+        let mut character_input = self.character_input;
         let mut yaw_delta = 0.0;
         let mut pitch_delta = 0.0;
         for ie in self.config.controls.events() {
             match ie {
                 Fire(target) => {
                     match target {
-                        Jump => self.character_input.jumping = true,
+                        Jump => character_input.num_jumps += 1,
                         NextWeapon => println!("next weapon"),
                         PrevWeapon => println!("previous weapon"),
                         ToggleMenu => {
@@ -301,17 +297,18 @@ impl Client {
                 Switch { target, state} => match target {
                     Shoot => if state == Active { println!("pew") },
                     Aim => if state == Active { println!("aim") },
-                    MoveForward => self.character_input.forward = state == Active,
-                    MoveBackward => self.character_input.backward = state == Active,
-                    MoveLeft => self.character_input.left = state == Active,
-                    MoveRight => self.character_input.right = state == Active,
-                    Crouch => self.character_input.crouch = state == Active,
+                    MoveForward => character_input.forward = state == Active,
+                    MoveBackward => character_input.backward = state == Active,
+                    MoveLeft => character_input.left = state == Active,
+                    MoveRight => character_input.right = state == Active,
+                    Crouch => character_input.crouch = state == Active,
                 }
             }
         }
+        character_input.view_dir.add_yaw(FPAngle::from_tau_float(yaw_delta));
+        character_input.view_dir.add_pitch(FPAngle::from_tau_float(pitch_delta));
         if !self.menu.active() {
-            self.character_input.view_dir.add_yaw(FPAngle::from_tau_float(yaw_delta));
-            self.character_input.view_dir.add_pitch(FPAngle::from_tau_float(pitch_delta));
+            self.character_input = character_input;
         }
     }
 }

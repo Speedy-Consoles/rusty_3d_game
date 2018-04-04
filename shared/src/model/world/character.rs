@@ -35,19 +35,14 @@ pub struct CharacterInput {
     pub right: bool,
     pub left: bool,
     pub crouch: bool,
-    pub jumping: bool, // TODO consider to make this a counter, so we don't need to reset it
+    pub num_jumps: u64,
     pub view_dir: ViewDir,
-}
-
-impl CharacterInput {
-    pub fn reset_flags(&mut self) { // TODO rethink this
-        self.jumping = false;
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Character {
     input: CharacterInput,
+    old_input: CharacterInput,
     pos: Vec3,
     vel: Vec3,
     view_dir: ViewDir,
@@ -61,6 +56,7 @@ impl Character {
         let character_height = FixedPoint::fraction(17, 10); // TODO use const in consts instead
         Character {
             input: Default::default(),
+            old_input: Default::default(),
             pos: Vec3::new(
                 FixedPoint::zero(),
                 FixedPoint::zero(),
@@ -121,7 +117,7 @@ impl Character {
             input_acceleration.x * ys + input_acceleration.y * yc,
             input_acceleration.z
         );
-        if self.grounded() && self.input.jumping {
+        if self.grounded() && (self.input.num_jumps > self.old_input.num_jumps) {
             self.jumping = true;
         }
 
@@ -190,7 +186,7 @@ impl Character {
         self.view_dir = self.input.view_dir;
 
         // reset flags
-        self.input.reset_flags();
+        self.old_input = self.input;
     }
 
     fn grounded(&self) -> bool {
