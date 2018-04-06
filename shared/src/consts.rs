@@ -44,10 +44,20 @@ pub const NEWEST_START_TICK_TIME_WEIGHT: f64 = 0.001;
 pub const SNAPSHOT_ARRIVAL_SIGMA_FACTOR: f64 = 3.0;
 
 pub const NEWEST_START_PREDICTED_TICK_TIME_WEIGHT: f64 = 0.001;
-pub const INPUT_ARRIVAL_SIGMA_FACTOR: f64 = 3.0;
+pub const INPUT_ARRIVAL_SIGMA_FACTOR: f64 = 4.0;
 
+pub fn initial_lag_assumption() -> Duration {
+    Duration::new(0, 20000000)
+}
+
+// How long to remember when an input was sent.
+// The send time is important to determine the predicted tick, once the ack arrives.
+// If this time is too short, the estimation of the variance in arrival will be bad,
+// because too much of the sample interval will be cut off.
+// The longer this time is, the more ticks need to be remembered (TICK_RATE * max_input_keep_time())
+// in the worst case (no acks from the server).
 pub fn max_input_keep_time() -> Duration {
-    Duration::from_secs(2)
+    Duration::from_secs(10)
 }
 
 pub fn connection_request_resend_interval() -> Duration {

@@ -47,6 +47,7 @@ struct AfterSnapshotData {
 impl AfterSnapshotData {
     fn new(snapshot: Snapshot, recv_time: Instant) -> AfterSnapshotData {
         let start_tick_time = recv_time - snapshot.tick() / TICK_SPEED;
+        let start_predicted_tick_time = start_tick_time - consts::initial_lag_assumption();
         AfterSnapshotData {
             tick: snapshot.tick(),
             predicted_tick: snapshot.tick(),
@@ -58,7 +59,8 @@ impl AfterSnapshotData {
             start_tick_time_distribution: OnlineDistribution::new(start_tick_time),
             oldest_snapshot_tick: snapshot.tick(),
             snapshots: iter::once((snapshot.tick(), snapshot)).collect(),
-            start_predicted_tick_distribution: OnlineDistribution::new(start_tick_time), // TODO better initial value
+            // TODO start_predicted_tick_time should be determined by ping from connection request instead
+            start_predicted_tick_distribution: OnlineDistribution::new(start_predicted_tick_time),
             sent_inputs: HashMap::new(),
             sent_input_times: HashMap::new(),
         }
@@ -100,6 +102,8 @@ impl AfterSnapshotData {
                 start_predicted_tick_time,
                 NEWEST_START_PREDICTED_TICK_TIME_WEIGHT,
             );
+        } else {
+            println!("DEBUG: Received input ack of unknown input!");
         }
     }
 
