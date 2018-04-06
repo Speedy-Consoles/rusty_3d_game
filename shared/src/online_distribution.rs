@@ -47,3 +47,44 @@ where T: Copy + PartialOrd + Mix + Sub<T, Output=Duration> + Add<Duration, Outpu
         util::duration_from_float(self.variance.sqrt() * sigma_factor)
     }
 }
+
+#[cfg(test)]
+mod test {
+
+    use rand;
+    use rand::distributions::IndependentSample;
+    use rand::distributions::Gamma;
+    use rand::Rng;
+    use rand::SeedableRng;
+    use rand::StdRng;
+
+    use util;
+
+    use super::OnlineDistribution;
+
+    #[test]
+    fn test() {
+        let seed: &[_] = &[42];
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+
+        let mean = 10.0;
+        let std_dev = 20.0;
+
+        let shape = mean * mean / (std_dev * std_dev);
+        let scale = std_dev * std_dev / mean;
+        let distribution = Gamma::new(shape, scale);
+
+        let initial_sample = distribution.ind_sample(&mut rng);
+        let mut od = OnlineDistribution::new(util::duration_from_float(initial_sample));
+
+        for _ in 0..100000 {
+            let sample = distribution.ind_sample(&mut rng);
+            od.add_sample(util::duration_from_float(sample), 0.001);
+        }
+
+        let calculated_std_dev = util::duration_as_float(od.sigma_dev(1.0));
+
+        println!("{:?}", calculated_std_dev);
+        assert!((std_dev - calculated_std_dev).abs() / std_dev < 0.1);
+    }
+}

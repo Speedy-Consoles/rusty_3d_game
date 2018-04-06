@@ -14,6 +14,7 @@ extern crate serde;
 extern crate bincode;
 #[macro_use] extern crate serde_derive;
 extern crate arrayvec;
+extern crate rand;
 
 use std::fmt;
 use std::io;
