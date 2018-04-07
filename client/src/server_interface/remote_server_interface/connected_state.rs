@@ -128,7 +128,7 @@ impl AfterSnapshotData {
 
         let min_factor = 0.5;
         let max_factor = 2.0;
-        let factor_factor = 0.5;
+        let factor_factor = 0.05;
         let jump_threshold = 30.0;
         let mut speed_factor;
         if float_tick_diff < jump_threshold {
@@ -164,8 +164,14 @@ impl AfterSnapshotData {
         );
         let target_predicted_tick = arrival_tick_instant.tick + 1;
 
-        let factor = 0.05;
+        let factor = 0.001;
         if target_predicted_tick >= self.predicted_tick {
+            if target_predicted_tick > self.predicted_tick {
+                println!(
+                    "DEBUG: predicted tick jumping by {}!",
+                    target_predicted_tick - self.predicted_tick
+                );
+            }
             self.predicted_tick_decrease = 0.0;
             self.predicted_tick = target_predicted_tick;
         } else {

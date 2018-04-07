@@ -188,7 +188,7 @@ impl ServerInterface for RemoteServerInterface {
         match self.internal_state {
             Connecting { .. } => ConnectionState::Connecting,
             Connected { ref con_state, .. } => con_state.connection_state(),
-            Disconnecting { .. } => ConnectionState::Disconnecting,
+            Disconnecting => ConnectionState::Disconnecting,
             Disconnected(ref reason) => ConnectionState::Disconnected(match reason {
                 &UserDisconnect => DisconnectedReason::UserDisconnect,
                 &Kicked { ref kick_message } => DisconnectedReason::Kicked { kick_message },
