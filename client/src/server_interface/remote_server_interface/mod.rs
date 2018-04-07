@@ -17,6 +17,7 @@ use shared::net::socket::CheckedMessage;
 use shared::net::ServerMessage;
 use shared::net::ConlessServerMessage::*;
 use shared::net::ReliableServerMessage::*;
+use shared::net::UnreliableServerMessage::*;
 use shared::net::ClientMessage;
 use shared::net::ConlessClientMessage::*;
 use shared::net::ReliableClientMessage::*;
@@ -26,6 +27,7 @@ use super::ConnectionState;
 use super::ServerInterface;
 use super::HandleTrafficResult;
 use self::connected_state::ConnectedState;
+use self::connected_state::ConnectedStateTickResult;
 use self::InternalState::*;
 use self::InternalDisconnectedReason::*;
 use self::socket::ConnectedSocket;
@@ -66,7 +68,7 @@ impl RemoteServerInterface {
             socket: ReliableSocket::new(
                 ConnectedSocket::new(addr)?,
                 //CrapNetSocket::new(addr, 0.5, 0.3, 0.3, 0.5, 0.3, 0.3)?,
-                consts::timeout_duration(),
+                consts::ack_timeout_duration(),
                 consts::disconnect_force_timeout(),
                 false,
             ),
@@ -85,6 +87,14 @@ impl RemoteServerInterface {
             self.internal_state = Disconnected(Kicked {
                 kick_message: String::from("You were kicked for some reason"), // TODO replace with actual message
             });
+            return;
+        }
+        if let (
+            &Connected { con_id, .. },
+            &CheckedMessage::Conful { cmsg: ConMessage::Unreliable(TimeOutMessage), .. }
+        ) = (&self.internal_state, &msg) {
+            self.socket.terminate(con_id);
+            self.internal_state = Disconnected(TimedOut);
             return;
         }
         match self.internal_state {
@@ -116,16 +126,24 @@ impl RemoteServerInterface {
 
 impl ServerInterface for RemoteServerInterface {
     fn do_tick(&mut self, character_input: CharacterInput) {
+        let mut timed_out = false;
         match self.internal_state {
             Connecting { ref mut resend_time } => {
                 *resend_time = Instant::now() + consts::connection_request_resend_interval();
                 self.socket.send_to_conless((), ConnectionRequest);
             },
             Connected { ref mut con_state, con_id } => {
-                con_state.do_tick(character_input, &mut self.socket, con_id)
+                match con_state.do_tick(character_input, &mut self.socket, con_id) {
+                    ConnectedStateTickResult::Ok => (),
+                    ConnectedStateTickResult::SnapshotTimeout
+                    | ConnectedStateTickResult::InputAckTimeout => timed_out = true,
+                }
             },
             Disconnecting | Disconnected(_) => (),
         };
+        if timed_out {
+            self.internal_state = Disconnected(TimedOut);
+        }
     }
 
     fn handle_traffic(&mut self, until: Instant) -> HandleTrafficResult {

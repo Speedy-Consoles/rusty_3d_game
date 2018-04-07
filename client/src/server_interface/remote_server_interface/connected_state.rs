@@ -26,6 +26,14 @@ use shared::online_distribution::OnlineDistribution;
 use server_interface::remote_server_interface::ClientSocket;
 use server_interface::ConnectionState;
 
+use self::InternalState::*;
+
+pub enum ConnectedStateTickResult {
+    Ok,
+    SnapshotTimeout,
+    InputAckTimeout,
+}
+
 struct AfterSnapshotData {
     tick: u64,
     predicted_tick: u64,
@@ -40,6 +48,8 @@ struct AfterSnapshotData {
     start_predicted_tick_distribution: OnlineDistribution<Instant>,
     sent_inputs: HashMap<u64, CharacterInput>,
     sent_input_times: HashMap<u64, Instant>,
+    last_valid_snapshot_time: Instant,
+    last_valid_input_ack_time: Instant,
 }
 
 impl AfterSnapshotData {
@@ -61,6 +71,8 @@ impl AfterSnapshotData {
             start_predicted_tick_distribution: OnlineDistribution::new(start_predicted_tick_time),
             sent_inputs: HashMap::new(),
             sent_input_times: HashMap::new(),
+            last_valid_snapshot_time: recv_time,
+            last_valid_input_ack_time: recv_time,
         }
     }
 
@@ -87,12 +99,14 @@ impl AfterSnapshotData {
         // TODO ignore snapshots with insanely high tick
         if snapshot.tick() > self.oldest_snapshot_tick {
             self.snapshots.insert(snapshot.tick(), snapshot);
+            self.last_valid_snapshot_time = recv_time;
         } else {
             println!("DEBUG: Discarded snapshot {}!", snapshot.tick());
         }
     }
 
-    fn on_input_ack(&mut self, input_tick: u64, arrival_tick_instant: TickInstant) {
+    fn on_input_ack(&mut self, input_tick: u64, arrival_tick_instant: TickInstant,
+                    recv_time: Instant) {
         if let Some(send_time) = self.sent_input_times.get(&input_tick) {
             let start_predicted_tick_time = *send_time
                 - (arrival_tick_instant - TickInstant::zero()) / TICK_SPEED;
@@ -100,6 +114,7 @@ impl AfterSnapshotData {
                 start_predicted_tick_time,
                 NEWEST_START_PREDICTED_TICK_TIME_WEIGHT,
             );
+            self.last_valid_input_ack_time = recv_time;
         } else {
             println!("DEBUG: Received input ack of unknown input!");
         }
@@ -232,7 +247,11 @@ impl AfterSnapshotData {
         }
         for tick in (self.oldest_snapshot_tick + 1)..(self.tick + 1) {
             if let Some(input) = self.sent_inputs.get(&tick) {
-                self.model.set_character_input(my_player_id, *input);
+                if self.model.player(my_player_id).is_some() {
+                    self.model.set_character_input(my_player_id, *input);
+                } else {
+                    println!("DEBUG: Server gave us snapshot without us in it!");
+                }
             }
             self.model.do_tick();
         }
@@ -247,42 +266,64 @@ impl AfterSnapshotData {
     }
 }
 
+enum InternalState {
+    BeforeSnapshot {
+        init_time: Instant,
+    },
+    AfterSnapshot(AfterSnapshotData),
+}
+
 pub struct ConnectedState {
     my_player_id: u64,
-    after_snapshot_data: Option<AfterSnapshotData>,
+    internal_state: InternalState,
 }
 
 impl ConnectedState {
     pub fn new(my_player_id: u64) -> ConnectedState {
         ConnectedState {
             my_player_id,
-            after_snapshot_data: None,
+            internal_state: BeforeSnapshot { init_time: Instant::now() },
         }
     }
 
     pub fn do_tick(&mut self, character_input: CharacterInput, socket: &mut ClientSocket,
-                   con_id: ConId) {
-        // TODO check if server is not sending snapshots
-        // TODO check if server is not acking input
-        if let Some(ref mut data) = self.after_snapshot_data {
-            data.update_tick();
-            data.send_and_save_input(character_input, socket, con_id);
-            data.remove_old_snapshots_and_inputs();
-            data.update_model(self.my_player_id);
+                   con_id: ConId) -> ConnectedStateTickResult {
+        let now = Instant::now();
+        match self.internal_state {
+            BeforeSnapshot { init_time } => {
+                if now > init_time + consts::snapshot_timeout_duration() {
+                    ConnectedStateTickResult::SnapshotTimeout
+                } else {
+                    ConnectedStateTickResult::Ok
+                }
+            },
+            AfterSnapshot(ref mut data) => {
+                if now > data.last_valid_snapshot_time + consts::snapshot_timeout_duration() {
+                    return ConnectedStateTickResult::SnapshotTimeout;
+                }
+                if now > data.last_valid_input_ack_time + consts::input_ack_timeout_duration() {
+                    return ConnectedStateTickResult::InputAckTimeout;
+                }
+                data.update_tick();
+                data.send_and_save_input(character_input, socket, con_id);
+                data.remove_old_snapshots_and_inputs();
+                data.update_model( self.my_player_id);
+                ConnectedStateTickResult::Ok
+            }
         }
     }
 
     pub fn next_tick_time(&self) -> Option<Instant> {
-        match self.after_snapshot_data {
-            None => None,
-            Some(ref data) => Some(data.next_tick_time),
+        match self.internal_state {
+            BeforeSnapshot { init_time } => Some(init_time + consts::snapshot_timeout_duration()),
+            AfterSnapshot(ref data) => Some(data.next_tick_time),
         }
     }
 
     pub fn connection_state(&self) -> ConnectionState {
-        match self.after_snapshot_data {
-            None => ConnectionState::Connecting,
-            Some(ref data) => ConnectionState::Connected {
+        match self.internal_state {
+            BeforeSnapshot { .. } => ConnectionState::Connecting,
+            AfterSnapshot(ref data) => ConnectionState::Connected {
                 my_player_id: self.my_player_id,
                 tick_instant: TickInstant::from_interval(
                     data.tick, data.tick_time,
@@ -298,15 +339,16 @@ impl ConnectedState {
     pub fn handle_unreliable_message(&mut self, msg: UnreliableServerMessage) {
         let recv_time = Instant::now();
         match msg {
-            SnapshotMessage(snapshot) => match self.after_snapshot_data {
-                None => self.after_snapshot_data = Some(
-                    AfterSnapshotData::new(snapshot, recv_time)
-                ),
-                Some(ref mut data) => data.on_snapshot(snapshot, recv_time),
+            TimeOutMessage => (), // should be handled before
+            SnapshotMessage(snapshot) => match self.internal_state {
+                BeforeSnapshot { .. } => {
+                    self.internal_state = AfterSnapshot(AfterSnapshotData::new(snapshot, recv_time))
+                },
+                AfterSnapshot(ref mut data) => data.on_snapshot(snapshot, recv_time),
             },
             InputAck { input_tick, arrival_tick_instant } => {
-                if let Some(ref mut data) = self.after_snapshot_data {
-                    data.on_input_ack(input_tick, arrival_tick_instant);
+                if let AfterSnapshot(ref mut data) = self.internal_state {
+                    data.on_input_ack(input_tick, arrival_tick_instant, recv_time);
                 }
             }
         }

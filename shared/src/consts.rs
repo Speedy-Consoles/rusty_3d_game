@@ -14,7 +14,7 @@ pub const TICK_SPEED: TickRate = TickRate { per_second: 120 };
 // TODO move const fixed points from model here
 
 // network
-pub fn timeout_duration() -> Duration {
+pub fn ack_timeout_duration() -> Duration {
     Duration::from_secs(10)
 }
 pub const MAX_UNACKED_MESSAGES: usize = 1024;
@@ -60,6 +60,14 @@ pub fn max_input_keep_time() -> Duration {
     Duration::from_secs(10)
 }
 
+pub fn input_ack_timeout_duration() -> Duration {
+    Duration::from_secs(10)
+}
+
+pub fn snapshot_timeout_duration() -> Duration {
+    Duration::from_secs(10)
+}
+
 pub fn connection_request_resend_interval() -> Duration {
     Duration::from_secs(1)
 }
@@ -69,3 +77,8 @@ pub fn disconnect_force_timeout() -> Duration {
 }
 
 // SERVER
+pub const MAX_INPUT_TICK_LEAD: u64 = 2000;
+
+pub fn input_timeout_duration() -> Duration {
+    Duration::from_secs(10)
+}

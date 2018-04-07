@@ -14,6 +14,7 @@ use net2::UdpBuilder;
 
 use shared::consts;
 use shared::consts::TICK_SPEED;
+use shared::consts::MAX_INPUT_TICK_LEAD;
 use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::tick_time::TickInstant;
@@ -44,11 +45,13 @@ enum TickTarget {
 struct Client {
     player_id: u64,
     inputs: HashMap<u64, CharacterInput>,
+    last_input_time: Instant,
 }
 
 pub struct Server {
     socket: ReliableSocket<SocketAddr, ServerMessage, ClientMessage, WrappedServerUdpSocket>,
     clients: HashMap<ConId, Client>, // TODO consider making this an array
+    client_remove_buffer: Vec<ConId>, // TODO add remove reason for message
     model: Model,
     tick: u64,
     tick_time: Instant,
@@ -66,11 +69,12 @@ impl Server {
         Ok(Server {
             socket: ReliableSocket::new(
                 wrapped_socket,
-                consts::timeout_duration(),
-                consts::timeout_duration(),
+                consts::ack_timeout_duration(),
+                consts::ack_timeout_duration(),
                 true,
             ),
             clients: HashMap::new(),
+            client_remove_buffer: Vec::new(),
             model: Model::new(),
             tick: 0,
             tick_time: Instant::now(),
@@ -91,8 +95,8 @@ impl Server {
 
         // main loop
         while !self.closing { // TODO add way to exit
-
-            // TODO check if clients are not acking snapshots
+            // check input timeouts
+            self.check_input_timeouts();
 
             // socket tick
             if let Some(next_socket_tick_time) = self.socket.next_tick_time() {
@@ -219,6 +223,7 @@ impl Server {
                                 self.clients.insert(con_id, Client {
                                     player_id,
                                     inputs: HashMap::new(),
+                                    last_input_time: recv_time,
                                 });
                                 // TODO broadcast join message
                                 player_id
@@ -244,15 +249,22 @@ impl Server {
                     ConMessage::Unreliable(umsg) => {
                         match umsg {
                             InputMessage { tick, input } => {
-                                if tick > self.tick {
-                                    // TODO ignore insanely high ticks
-                                    client.inputs.insert(tick, input);
-                                } else {
+                                client.last_input_time = recv_time;
+                                if tick <= self.tick {
                                     println!(
                                         "Input came too late! | Current tick: {} | Target tick: {}",
                                         self.tick,
                                         tick,
                                     );
+                                } else if tick > self.tick + MAX_INPUT_TICK_LEAD {
+                                    println!(
+                                        "Input tick too advanced! | Current tick: {} \
+                                         | Target tick: {}",
+                                        self.tick,
+                                        tick,
+                                    );
+                                } else {
+                                    client.inputs.insert(tick, input);
                                 }
                                 self.socket.send_to_unreliable(
                                     con_id,
@@ -274,11 +286,29 @@ impl Server {
         }
     }
 
-    fn remove_client(&mut self, con_id: ConId) { // TODO add remove reason for message
-        let client = self.clients.remove(&con_id).unwrap();
-        self.con_id_by_player_id.remove(&client.player_id).unwrap();
-        self.model.remove_player(client.player_id);
-        // TODO broadcast leave message
-        return;
+    fn check_input_timeouts(&mut self) {
+        let now = Instant::now();
+        for (&con_id, client) in self.clients.iter() {
+            if now > client.last_input_time + consts::input_timeout_duration() {
+                self.socket.send_to_unreliable(con_id, TimeOutMessage);
+                self.socket.terminate(con_id);
+                self.client_remove_buffer.push(con_id);
+            }
+        }
+        self.remove_clients();
+    }
+
+    fn remove_client(&mut self, con_id: ConId) {
+        self.client_remove_buffer.push(con_id);
+        self.remove_clients();
+    }
+
+    fn remove_clients(&mut self) {
+        for con_id in self.client_remove_buffer.drain(..) {
+            let client = self.clients.remove(&con_id).unwrap();
+            self.con_id_by_player_id.remove(&client.player_id).unwrap();
+            self.model.remove_player(client.player_id);
+            // TODO broadcast leave message
+        }
     }
 }

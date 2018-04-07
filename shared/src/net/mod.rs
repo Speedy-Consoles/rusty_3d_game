@@ -169,6 +169,7 @@ pub enum ReliableServerMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UnreliableServerMessage {
+    TimeOutMessage,
     SnapshotMessage(Snapshot),
     InputAck {
         input_tick: u64,
