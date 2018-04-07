@@ -26,8 +26,6 @@ use shared::online_distribution::OnlineDistribution;
 use server_interface::remote_server_interface::ClientSocket;
 use server_interface::ConnectionState;
 
-use super::EventQueue;
-
 struct AfterSnapshotData {
     tick: u64,
     predicted_tick: u64,
@@ -151,7 +149,7 @@ impl AfterSnapshotData {
     }
 
     fn send_and_save_input(&mut self, character_input: CharacterInput, socket: &mut ClientSocket,
-                           con_id: ConId, event_queue: &mut EventQueue) {
+                           con_id: ConId) {
         self.predicted_tick += 1;
         let send_time = Instant::now();
         // we add a multiple of the standard deviation of the input arrival time distribution
@@ -189,7 +187,7 @@ impl AfterSnapshotData {
             input: character_input,
         };
         // TODO if we resend any input, the server will send another ack and we might calculate a wrong input delay
-        socket.send_to_unreliable(con_id, msg, event_queue);
+        socket.send_to_unreliable(con_id, msg);
         self.sent_input_times.insert(self.predicted_tick, send_time);
         self.sent_inputs.insert(self.predicted_tick, character_input);
     }
@@ -263,12 +261,12 @@ impl ConnectedState {
     }
 
     pub fn do_tick(&mut self, character_input: CharacterInput, socket: &mut ClientSocket,
-                   con_id: ConId, event_queue: &mut EventQueue) {
+                   con_id: ConId) {
         // TODO check if server is not sending snapshots
         // TODO check if server is not acking input
         if let Some(ref mut data) = self.after_snapshot_data {
             data.update_tick();
-            data.send_and_save_input(character_input, socket, con_id, event_queue);
+            data.send_and_save_input(character_input, socket, con_id);
             data.remove_old_snapshots_and_inputs();
             data.update_model(self.my_player_id);
         }

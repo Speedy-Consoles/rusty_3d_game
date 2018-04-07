@@ -232,8 +232,8 @@ pub struct ReliableSocket<
     next_tick_time: Instant,
     timeout_duration: Duration,
     timeout_duration_disconnecting: Duration,
+    event_queue: VecDeque<SocketEvent<AddrType, RecvType>>,
     phantom_send: PhantomData<SendType>,
-    phantom_recv: PhantomData<RecvType>,
 }
 
 impl<
@@ -254,8 +254,8 @@ impl<
             next_tick_time: Instant::now(),
             timeout_duration: ack_timeout,
             timeout_duration_disconnecting: ack_timeout_disconnecting,
+            event_queue: VecDeque::new(),
             phantom_send: PhantomData,
-            phantom_recv: PhantomData,
         }
     }
 
@@ -291,17 +291,16 @@ impl<
         }
     }
 
-    pub fn terminate(&mut self, con_id: ConId,
-                     event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
+    pub fn terminate(&mut self, con_id: ConId) {
         if let Some(mut con) = self.connections.remove(&con_id) {
             self.con_ids_by_addr.remove(&con.addr).unwrap();
-            con.send_ack(&mut self.socket, event_queue);
+            con.send_ack(&mut self.socket, &mut self.event_queue);
         } else {
             println!("ERROR: Tried to disconnect non-existing connection");
         }
     }
 
-    pub fn do_tick(&mut self, event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
+    pub fn do_tick(&mut self) {
         // TODO maybe also resend?
         let now = Instant::now();
         for (&con_id, con) in self.connections.iter_mut() {
@@ -349,7 +348,7 @@ impl<
                     buf[header_size..msg_size].copy_from_slice(&sent_message.data);
                     let msg_size = header_size + sent_message.data.len();
                     if let Err(err) = self.socket.send_to(&buf[..msg_size], con.addr) {
-                        event_queue.push_back(NetworkError(err));
+                        self.event_queue.push_back(NetworkError(err));
                     }
                 }
                 con.last_resend_time = Some(now);
@@ -362,12 +361,12 @@ impl<
             let con = self.connections.remove(&con_id).unwrap();
             self.con_ids_by_addr.remove(&con.addr).unwrap();
             if con.disconnecting {
-                event_queue.push_back(SocketEvent::DisconnectingConnectionEnd {
+                self.event_queue.push_back(SocketEvent::DisconnectingConnectionEnd {
                     reason: TimedOut,
                     con_id,
                 });
             } else {
-                event_queue.push_back(SocketEvent::ConnectionEnd {
+                self.event_queue.push_back(SocketEvent::ConnectionEnd {
                     reason: TimedOut,
                     con_id,
                 });
@@ -387,20 +386,18 @@ impl<
         }
     }
 
-    pub fn send_to_conless(&mut self, addr: AddrType, msg: SendType::Conless,
-            event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
+    pub fn send_to_conless(&mut self, addr: AddrType, msg: SendType::Conless) {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let header = MessageHeader::Conless;
         let header_size = header.pack(&mut buf).unwrap();
         let payload_size = msg.pack(&mut buf[header_size..]).unwrap();
         let msg_size = header_size + payload_size;
         if let Err(err) = self.socket.send_to(&buf[..msg_size], addr) {
-            event_queue.push_back(NetworkError(err));
+            self.event_queue.push_back(NetworkError(err));
         }
     }
 
-    pub fn send_to_reliable(&mut self, con_id: ConId, msg: SendType::Reliable,
-            event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
+    pub fn send_to_reliable(&mut self, con_id: ConId, msg: SendType::Reliable) {
         let mut buffer_full = false;
         if let Some(con) = self.connections.get_mut(&con_id) {
             if con.disconnecting {
@@ -414,7 +411,7 @@ impl<
             ) {
                 Ok(_) => (),
                 Err(SendReliableError::BufferFull) => buffer_full = true,
-                Err(SendReliableError::NetworkError(e)) => event_queue.push_back(NetworkError(e)),
+                Err(SendReliableError::NetworkError(e)) => self.event_queue.push_back(NetworkError(e)),
             }
         } else {
             println!("ERROR: Tried to send reliable message without connection!");
@@ -423,15 +420,14 @@ impl<
         if buffer_full {
             let con = self.connections.remove(&con_id).unwrap();
             self.con_ids_by_addr.remove(&con.addr).unwrap();
-            event_queue.push_back(SocketEvent::ConnectionEnd {
+            self.event_queue.push_back(SocketEvent::ConnectionEnd {
                 reason: TimedOut,
                 con_id,
             });
         }
     }
 
-    pub fn send_to_unreliable(&mut self, con_id: ConId, msg: SendType::Unreliable,
-            event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
+    pub fn send_to_unreliable(&mut self, con_id: ConId, msg: SendType::Unreliable) {
         if let Some(con) = self.connections.get_mut(&con_id) {
             if con.disconnecting {
                 println!("DEBUG: Tried to send message with disconnecting connection!");
@@ -441,15 +437,14 @@ impl<
             con.send_unreliable::<SendType, WrappedUdpSocketType, RecvType>(
                 msg,
                 &mut self.socket,
-                event_queue,
+                &mut self.event_queue,
             );
         } else {
             println!("ERROR: Tried to send unreliable message without connection!");
         }
     }
 
-    pub fn broadcast_reliable(&mut self, msg: SendType::Reliable,
-            event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
+    pub fn broadcast_reliable(&mut self, msg: SendType::Reliable) {
         for (&con_id, con) in self.connections.iter_mut() {
             if !con.disconnecting {
                 // TODO pack here
@@ -462,7 +457,7 @@ impl<
                         self.remove_connections_buffer.push(con_id)
                     },
                     Err(SendReliableError::NetworkError(e)) => {
-                        event_queue.push_back(NetworkError(e))
+                        self.event_queue.push_back(NetworkError(e))
                     },
                 }
             }
@@ -471,31 +466,34 @@ impl<
         for &con_id in self.remove_connections_buffer.iter() {
             let con = self.connections.remove(&con_id).unwrap();
             self.con_ids_by_addr.remove(&con.addr).unwrap();
-            event_queue.push_back(SocketEvent::ConnectionEnd {
+            self.event_queue.push_back(SocketEvent::ConnectionEnd {
                 reason: TimedOut,
                 con_id
             });
         }
     }
 
-    pub fn broadcast_unreliable(&mut self, msg: SendType::Unreliable,
-            event_queue: &mut VecDeque<SocketEvent<AddrType, RecvType>>) {
+    pub fn broadcast_unreliable(&mut self, msg: SendType::Unreliable) {
         for (_, con) in self.connections.iter_mut() {
             if !con.disconnecting {
                 // TODO pack here
                 con.send_unreliable::<SendType, WrappedUdpSocketType, RecvType>(
                     msg.clone(),
                     &mut self.socket,
-                    event_queue,
+                    &mut self.event_queue,
                 );
             }
         }
     }
 
     // TODO maybe this wrapper method is not needed and we just return if the time is up
-    pub fn recv_from_until<'a>(&'a mut self, until: Instant)
-            -> Option<SocketEvent<AddrType, RecvType>> {
-        // first make sure we read a message if there are any
+    pub fn wait_event(&mut self, until: Instant) -> Option<SocketEvent<AddrType, RecvType>> {
+        // first return any queued event
+        if let Some(event) = self.event_queue.pop_front() {
+            return Some(event);
+        }
+
+        // then make sure we read a message if there are any
         self.socket.set_nonblocking(true).unwrap();
         let result = self.recv_from(None);
         self.socket.set_nonblocking(false).unwrap();

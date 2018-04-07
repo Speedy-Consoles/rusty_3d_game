@@ -5,7 +5,6 @@ use std::time::Instant;
 use std::io;
 use std::net::SocketAddr;
 use std::thread;
-use std::collections::VecDeque;
 
 use shared::model::world::character::CharacterInput;
 use shared::consts;
@@ -32,8 +31,6 @@ use self::InternalDisconnectedReason::*;
 use self::socket::ConnectedSocket;
 use self::socket::CrapNetSocket;
 
-type EventQueue = VecDeque<SocketEvent<(), ServerMessage>>;
-
 enum InternalDisconnectedReason {
     NetworkError(io::Error),
     UserDisconnect,
@@ -59,7 +56,6 @@ type ClientSocket = ReliableSocket<(), ClientMessage, ServerMessage, ConnectedSo
 //type ClientSocket = ReliableSocket<(), ClientMessage, ServerMessage, CrapNetSocket>;
 
 pub struct RemoteServerInterface {
-    event_queue: EventQueue,
     internal_state: InternalState,
     socket: ClientSocket,
 }
@@ -67,10 +63,9 @@ pub struct RemoteServerInterface {
 impl RemoteServerInterface {
     pub fn new(addr: SocketAddr) -> io::Result<RemoteServerInterface> {
         Ok(RemoteServerInterface {
-            event_queue: EventQueue::new(),
             socket: ReliableSocket::new(
                 ConnectedSocket::new(addr)?,
-                //CrapNetSocket::new(addr, 0.7, 0.7, 0.0, 0.7, 0.7, 0.0)?,
+                //CrapNetSocket::new(addr, 0.5, 0.3, 0.3, 0.5, 0.3, 0.3)?,
                 consts::timeout_duration(),
                 consts::disconnect_force_timeout(),
                 false,
@@ -86,7 +81,7 @@ impl RemoteServerInterface {
             &Connected { con_id, .. },
             &CheckedMessage::Conful { cmsg: ConMessage::Reliable(ConnectionClose), .. }
         ) = (&self.internal_state, &msg) {
-            self.socket.terminate(con_id, &mut self.event_queue);
+            self.socket.terminate(con_id);
             self.internal_state = Disconnected(Kicked {
                 kick_message: String::from("You were kicked for some reason"), // TODO replace with actual message
             });
@@ -124,10 +119,10 @@ impl ServerInterface for RemoteServerInterface {
         match self.internal_state {
             Connecting { ref mut resend_time } => {
                 *resend_time = Instant::now() + consts::connection_request_resend_interval();
-                self.socket.send_to_conless((), ConnectionRequest, &mut self.event_queue);
+                self.socket.send_to_conless((), ConnectionRequest);
             },
             Connected { ref mut con_state, con_id } => {
-                con_state.do_tick(character_input, &mut self.socket, con_id, &mut self.event_queue)
+                con_state.do_tick(character_input, &mut self.socket, con_id)
             },
             Disconnecting | Disconnected(_) => (),
         };
@@ -135,7 +130,7 @@ impl ServerInterface for RemoteServerInterface {
 
     fn handle_traffic(&mut self, until: Instant) -> HandleTrafficResult {
         // TODO maybe also check if the internal state fits the events?
-        match self.event_queue.pop_front().or_else(|| self.socket.recv_from_until(until)) {
+        match self.socket.wait_event(until) {
             Some(SocketEvent::MessageReceived(msg)) => {
                 self.handle_message(msg);
                 HandleTrafficResult::Interrupt
@@ -209,11 +204,11 @@ impl ServerInterface for RemoteServerInterface {
     fn disconnect(&mut self) {
         match self.internal_state {
             Connecting { .. } => {
-                self.socket.send_to_conless((), ConnectionAbort, &mut self.event_queue);
+                self.socket.send_to_conless((), ConnectionAbort);
                 self.internal_state = Disconnected(UserDisconnect);
             },
             Connected { con_id, .. } => {
-                self.socket.send_to_reliable(con_id, DisconnectRequest, &mut self.event_queue);
+                self.socket.send_to_reliable(con_id, DisconnectRequest);
                 self.socket.disconnect(con_id);
                 self.internal_state = Disconnecting;
             },
@@ -222,7 +217,7 @@ impl ServerInterface for RemoteServerInterface {
     }
 
     fn do_socket_tick(&mut self) {
-        self.socket.do_tick(&mut self.event_queue);
+        self.socket.do_tick();
     }
 
     fn next_socket_tick_time(&self) -> Option<Instant> {

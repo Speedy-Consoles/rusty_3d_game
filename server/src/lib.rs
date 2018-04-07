@@ -7,7 +7,6 @@ extern crate shared;
 use std::thread;
 use std::time::Instant;
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::io;
 use std::net::SocketAddr;
 
@@ -36,8 +35,6 @@ use shared::net::Snapshot;
 use socket::WrappedServerUdpSocket;
 use TickTarget::*;
 
-type EventQueue = VecDeque<SocketEvent<SocketAddr, ClientMessage>>;
-
 enum TickTarget {
     GameTick,
     SocketTick,
@@ -51,7 +48,6 @@ struct Client {
 
 pub struct Server {
     socket: ReliableSocket<SocketAddr, ServerMessage, ClientMessage, WrappedServerUdpSocket>,
-    event_queue: EventQueue,
     clients: HashMap<ConId, Client>, // TODO consider making this an array
     model: Model,
     tick: u64,
@@ -74,7 +70,6 @@ impl Server {
                 consts::timeout_duration(),
                 true,
             ),
-            event_queue: EventQueue::new(),
             clients: HashMap::new(),
             model: Model::new(),
             tick: 0,
@@ -103,7 +98,7 @@ impl Server {
             if let Some(next_socket_tick_time) = self.socket.next_tick_time() {
                 let before_tick = Instant::now();
                 if next_socket_tick_time <= before_tick {
-                    self.socket.do_tick(&mut self.event_queue);
+                    self.socket.do_tick();
                 }
             }
 
@@ -125,7 +120,7 @@ impl Server {
                 }
                 self.model.do_tick();
                 let msg = SnapshotMessage(Snapshot::new(self.tick, &self.model));
-                self.socket.broadcast_unreliable(msg, &mut self.event_queue);
+                self.socket.broadcast_unreliable(msg);
                 tick_counter += 1;
 
                 // display tick rate
@@ -153,10 +148,7 @@ impl Server {
                 }
                 _ => (),
             }
-            let event = self.event_queue.pop_front().or_else(
-                || self.socket.recv_from_until(next_loop_time)
-            );
-            match event {
+            match self.socket.wait_event(next_loop_time) {
                 Some(SocketEvent::MessageReceived(msg)) => self.handle_message(msg),
                 Some(SocketEvent::DoneDisconnecting(con_id)) => {
                     println!("DEBUG: {} disconnected gracefully!", con_id);
@@ -203,7 +195,7 @@ impl Server {
             cmsg: ConMessage::Reliable(DisconnectRequest)
         } = msg {
             self.remove_client(con_id);
-            self.socket.terminate(con_id, &mut self.event_queue);
+            self.socket.terminate(con_id);
             return;
         }
         let recv_time = Instant::now();
@@ -232,11 +224,7 @@ impl Server {
                                 player_id
                             },
                         };
-                        self.socket.send_to_conless(
-                            addr,
-                            ConnectionConfirm(player_id),
-                            &mut self.event_queue,
-                        );
+                        self.socket.send_to_conless(addr, ConnectionConfirm(player_id));
                     },
                     ConnectionAbort => {
                         if let Some(con_id) = con_id {
@@ -277,7 +265,6 @@ impl Server {
                                             recv_time,
                                         )
                                     },
-                                    &mut self.event_queue,
                                 );
                             },
                         }
