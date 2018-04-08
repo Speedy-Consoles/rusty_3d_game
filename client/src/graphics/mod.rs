@@ -4,9 +4,11 @@ use std;
 use std::io::Read;
 use std::f64::consts::PI;
 use std::mem;
+use std::fs::File;
+use std::io::BufReader;
 
 use glium;
-use glium::backend::glutin::Display;
+use glium::Display;
 use glium::Surface;
 use glium::Frame;
 use glium::draw_parameters::Depth;
@@ -14,6 +16,10 @@ use glium::draw_parameters::DrawParameters;
 use glium::vertex::EmptyVertexAttributes;
 use glium::index::NoIndices;
 use glium::index::PrimitiveType;
+use glium_text;
+use glium_text::TextSystem;
+use glium_text::FontTexture;
+use glium_text::TextDisplay;
 use cgmath::Matrix4;
 use cgmath::SquareMatrix;
 use cgmath::Rad;
@@ -45,9 +51,12 @@ struct VertexObject {
 
 pub struct Graphics {
     character_head_vo: VertexObject,
+    text_system: TextSystem,
+    font: FontTexture,
     program: glium::program::Program,
     background_program: glium::program::Program,
     perspective_matrix: Matrix4<f32>,
+    debug_text_matrix: [[f32; 4]; 4],
     last_visual_world: VisualWorld,
     last_tick: u64,
     current_visual_world: VisualWorld,
@@ -73,10 +82,16 @@ impl Graphics {
             None
         ).unwrap();
 
+        let font_file = File::open("SourceCodeVariable-Roman.ttf").expect("Could not load font!");
+        let font = FontTexture::new(display, &font_file, 35).unwrap();
+
         Graphics {
             character_head_vo: Self::build_character_head(display),
+            text_system: TextSystem::new(display),
+            font,
             program,
             background_program,
+            debug_text_matrix: Matrix4::identity().into(),
             perspective_matrix: Matrix4::identity(),
             current_visual_world: VisualWorld::new(),
             current_tick: 0,
@@ -156,8 +171,9 @@ impl Graphics {
             (tick_diff - 1.0 + tick_instant.intra_tick) / tick_diff
         );
 
-        let character = if let Some(c) = my_character_id.and_then(|id|
-                self.current_visual_world.character(id)) {
+        let character = if let Some(c) = my_character_id.and_then(
+            |id| self.current_visual_world.character(id)
+        ) {
             c
         } else {
             return
@@ -193,6 +209,9 @@ impl Graphics {
             }
             self.draw_character(character, &mut frame, &world_to_screen_matrix);
         }
+
+        self.draw_debug_info(&mut frame);
+
         frame.finish().unwrap();
     }
 
@@ -250,9 +269,25 @@ impl Graphics {
         ).unwrap();
     }
 
+    fn draw_debug_info(&self, frame: &mut Frame) {
+        let tick_text = format!("Tick: {}", self.current_tick);
+        let text_display = TextDisplay::new(&self.text_system, &self.font, &tick_text);
+        let text_width = text_display.get_width();
+
+        let (w, h) = frame.get_dimensions();
+
+        glium_text::draw(
+            &text_display,
+            &self.text_system,
+            frame,
+            self.debug_text_matrix,
+            (1.0, 1.0, 1.0, 1.0)
+        );
+    }
+
     fn load_shader_source(file_name: &str) -> String {
-        let file = std::fs::File::open(file_name).expect("Could not load shader source!");
-        let mut buffer_reader = std::io::BufReader::new(file);
+        let file = File::open(file_name).expect("Could not load shader source!");
+        let mut buffer_reader = BufReader::new(file);
         let mut shader_source = String::new();
         buffer_reader.read_to_string(&mut shader_source)
             .expect("Error while reading shader source!");
@@ -266,6 +301,7 @@ impl Graphics {
             0.0
         };
         self.build_perspective_matrix(ratio, Y_FOV);
+        self.build_debug_text_matrix(ratio);
     }
 
     fn build_perspective_matrix(&mut self, mut screen_ratio: f64, mut y_fov: f64) {
@@ -277,7 +313,7 @@ impl Graphics {
             y_fov = ((y_fov / 2.0).tan() * OPTIMAL_SCREEN_RATIO / screen_ratio).atan() * 2.0;
         }
         let projection = PerspectiveFov {
-            fovy: Rad(y_fov as f32), // should be y
+            fovy: Rad(y_fov as f32),
             aspect: screen_ratio as f32,
             near: Z_NEAR as f32,
             far: Z_FAR as f32,
@@ -286,5 +322,27 @@ impl Graphics {
         self.perspective_matrix = projection_matrix
             * Matrix4::from_angle_y(Rad((PI / 2.0) as f32))
             * Matrix4::from_angle_x(Rad((-PI / 2.0) as f32));
+    }
+
+    fn build_debug_text_matrix(&mut self, mut screen_ratio: f64) {
+        let mut font_scaling = 0.04;
+        let mut scaling_factor = 1.0;
+        let mut x_offset = 0.0;
+        let mut y_offset = 0.0;
+        if screen_ratio > OPTIMAL_SCREEN_RATIO {
+            scaling_factor = OPTIMAL_SCREEN_RATIO / screen_ratio;
+            x_offset = 1.0 - scaling_factor as f32;
+        } else {
+            scaling_factor = screen_ratio / OPTIMAL_SCREEN_RATIO;
+            y_offset = 1.0 - scaling_factor as f32;
+        }
+        let y_scaling = (font_scaling * scaling_factor) as f32;
+        let x_scaling = (font_scaling * scaling_factor / screen_ratio) as f32;
+        self.debug_text_matrix = Matrix4::new(
+             x_scaling,        0.0,              0.0, 0.0,
+             0.0,              y_scaling,        0.0, 0.0,
+             0.0,              0.0,              1.0, 0.0,
+            -1.0 + x_offset,  -1.0 + y_offset,   0.0, 1.0f32,
+        ).into();
     }
 }

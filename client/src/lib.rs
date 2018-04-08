@@ -5,6 +5,7 @@ mod server_interface;
 mod menu;
 
 #[macro_use] extern crate glium;
+extern crate glium_text;
 extern crate cgmath;
 extern crate toml;
 extern crate num;

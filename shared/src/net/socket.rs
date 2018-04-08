@@ -301,7 +301,6 @@ impl<
     }
 
     pub fn do_tick(&mut self) {
-        // TODO maybe also resend?
         let now = Instant::now();
         for (&con_id, con) in self.connections.iter_mut() {
             // check if didn't hear anything for too long
@@ -445,9 +444,9 @@ impl<
     }
 
     pub fn broadcast_reliable(&mut self, msg: SendType::Reliable) {
+        // TODO pack here
         for (&con_id, con) in self.connections.iter_mut() {
             if !con.disconnecting {
-                // TODO pack here
                 match con.send_reliable::<SendType, WrappedUdpSocketType, RecvType>(
                     msg.clone(),
                     &mut self.socket,
@@ -474,9 +473,9 @@ impl<
     }
 
     pub fn broadcast_unreliable(&mut self, msg: SendType::Unreliable) {
+        // TODO pack here
         for (_, con) in self.connections.iter_mut() {
             if !con.disconnecting {
-                // TODO pack here
                 con.send_unreliable::<SendType, WrappedUdpSocketType, RecvType>(
                     msg.clone(),
                     &mut self.socket,
