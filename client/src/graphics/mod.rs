@@ -1,6 +1,7 @@
 mod model_graphics;
 
 use std::fs::File;
+use std::fmt::Write;
 
 use glium::Display;
 use glium::Frame;
@@ -23,11 +24,17 @@ use server_interface::ConnectionState;
 
 use self::model_graphics::ModelGraphics;
 
+struct DebugTextBuffers {
+    tick: String,
+    num_players: String,
+}
+
 pub struct Graphics {
     model_graphics: ModelGraphics,
     text_system: TextSystem,
     font: FontTexture,
     debug_text_matrix: Matrix4<f32>,
+    debug_text_buffers: DebugTextBuffers,
 }
 
 impl Graphics {
@@ -40,6 +47,10 @@ impl Graphics {
             text_system: TextSystem::new(display),
             font,
             debug_text_matrix: Matrix4::identity().into(),
+            debug_text_buffers: DebugTextBuffers {
+                tick: String::new(),
+                num_players: String::new(),
+            },
         }
     }
 
@@ -75,20 +86,28 @@ impl Graphics {
         frame.finish().unwrap();
     }
 
-    fn draw_debug_info(&self, frame: &mut Frame, connection_state: ConnectionState) {
+    fn draw_debug_info(&mut self, frame: &mut Frame, connection_state: ConnectionState) {
         let tick_text;
         let connection_state_text;
-        let num_players;
+        let num_players_text;
         match connection_state {
             ConnectionState::Connected { tick_instant, model, .. } => {
-                tick_text = format!("{}", tick_instant.tick); // TODO no allocation
-                connection_state_text = String::from("connected"); // TODO no allocation
-                num_players = format!("{}", model.world().characters().len());
+                let num_players = model.world().characters().len();
+
+                self.debug_text_buffers.tick.clear();
+                self.debug_text_buffers.num_players.clear();
+
+                write!(&mut self.debug_text_buffers.tick, "{}", tick_instant.tick).unwrap();
+                write!(&mut self.debug_text_buffers.num_players, "{}", num_players).unwrap();
+
+                tick_text = self.debug_text_buffers.tick.as_ref();
+                connection_state_text = "connected";
+                num_players_text = self.debug_text_buffers.num_players.as_ref();
             },
             _ => {
-                tick_text = String::from("---"); // TODO no allocation
-                connection_state_text = String::from("---"); // TODO no allocation
-                num_players = String::from("---"); // TODO no allocation
+                tick_text = "---";
+                connection_state_text = "---";
+                num_players_text = "---";
             },
         }
 
@@ -100,7 +119,7 @@ impl Graphics {
             ",
             connection_state_text,
             tick_text,
-            num_players
+            num_players_text
         );
 
         for (i, line) in debug_text.lines().enumerate() {
