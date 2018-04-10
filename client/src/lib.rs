@@ -164,28 +164,18 @@ impl Client {
                 },
                 SocketTick => self.server_interface.do_socket_tick(),
                 GraphicsTick => {
-                    if let Connected {
-                        tick_instant,
-                        my_player_id,
-                        model,
-                        predicted_world,
-                    } = self.server_interface.connection_state() {
-                        let view_dir = if self.config.direct_camera {
-                            Some(self.character_input.view_dir)
-                        } else {
-                            None
-                        };
+                    let view_dir = if self.config.direct_camera {
+                        Some(self.character_input.view_dir)
+                    } else {
+                        None
+                    };
 
-                        self.graphics.draw(
-                            model,
-                            predicted_world,
-                            my_player_id,
-                            view_dir,
-                            tick_instant,
-                            &self.display
-                        );
-                        draw_counter += 1;
-                    }
+                    self.graphics.draw(
+                        self.server_interface.connection_state(),
+                        view_dir,
+                        &self.display
+                    );
+                    draw_counter += 1;
                     if let Some(mut next_graphics_tick) = next_draw_time {
                         let now = Instant::now();
                         let draw_tick_diff = if now < next_graphics_tick {
