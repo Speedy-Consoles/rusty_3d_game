@@ -78,14 +78,17 @@ impl Graphics {
     fn draw_debug_info(&self, frame: &mut Frame, connection_state: ConnectionState) {
         let tick_text;
         let connection_state_text;
+        let num_players;
         match connection_state {
-            ConnectionState::Connected { tick_instant, .. } => {
-                tick_text = format!("{}", tick_instant.tick);
+            ConnectionState::Connected { tick_instant, model, .. } => {
+                tick_text = format!("{}", tick_instant.tick); // TODO no allocation
                 connection_state_text = String::from("connected"); // TODO no allocation
+                num_players = format!("{}", model.world().characters().len());
             },
             _ => {
                 tick_text = String::from("---"); // TODO no allocation
                 connection_state_text = String::from("---"); // TODO no allocation
+                num_players = String::from("---"); // TODO no allocation
             },
         }
 
@@ -93,9 +96,11 @@ impl Graphics {
             "\
                 Connection state: {}\n\
                 Tick: {}\n\
+                Num players: {}\n\
             ",
             connection_state_text,
             tick_text,
+            num_players
         );
 
         for (i, line) in debug_text.lines().enumerate() {
