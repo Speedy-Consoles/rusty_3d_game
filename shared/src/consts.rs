@@ -37,6 +37,9 @@ pub const Y_FOV: f64 = PI / 3.0;
 pub const Z_NEAR: f64 = 0.1;
 pub const Z_FAR: f64 = 100.0;
 pub const DRAW_SPEED: TickRate = TickRate { per_second: 60 }; // TODO move to config
+pub const DEBUG_TEXT_FONT_SIZE: u32 = 20;
+pub const DEBUG_TEXT_HEIGHT: f64 = 0.025;
+pub const DEBUG_TEXT_RELATIVE_LINE_HEIGHT: f64 = 1.3;
 
 // network
 //pub const MAX_PREDICT_TICKS: usize = 120;
