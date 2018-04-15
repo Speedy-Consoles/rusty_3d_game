@@ -15,11 +15,205 @@ use rand::Rng;
 use arrayvec::ArrayVec;
 
 use shared::util;
+use shared::consts;
+use shared::tick_time::TickInstant;
+use shared::net::Snapshot;
+use shared::net::socket::ConnectionEndReason;
 use shared::net::MAX_MESSAGE_LENGTH;
+use shared::net::socket::ConId;
 use shared::net::socket::WrappedUdpSocket;
+use shared::net::socket::ReliableSocket;
+use shared::net::socket::ReliableSocketEvent;
+use shared::net::socket::CheckedMessage;
+use shared::net::socket::ConMessage;
+use shared::net::ClientMessage;
+use shared::net::ConlessClientMessage::*;
+use shared::net::UnreliableClientMessage::*;
+use shared::net::ReliableClientMessage::*;
+use shared::net::ServerMessage;
+use shared::net::ConlessServerMessage::*;
+use shared::net::UnreliableServerMessage::*;
+use shared::net::ReliableServerMessage::*;
+use shared::model::world::character::CharacterInput;
 
-pub struct ConnectedSocket {
-    pub socket: UdpSocket,
+use self::ClientSocketEvent::*;
+use self::InternalState::*;
+
+pub enum ClientSocketEvent {
+    DoneConnecting {
+        my_player_id: u64,
+    },
+    SnapshotReceived(Snapshot),
+    InputAckReceived {
+        input_tick: u64,
+        arrival_tick_instant: TickInstant,
+    },
+    DoneDisconnecting,
+    DisconnectingConnectionEnd {
+        reason: ConnectionEndReason,
+        // TODO unacked messages
+    },
+    ConnectionEnd {
+        reason: ConnectionEndReason,
+        // TODO unacked messages
+    },
+    ConnectionClosed,
+    NetworkError(io::Error),
+}
+
+enum InternalState {
+    Connecting {
+        resend_time: Instant,
+    },
+    Connected {
+        con_id: ConId,
+    },
+    Disconnecting,
+    DisconnectedWithConAbort,
+    Disconnected,
+}
+
+pub struct ClientSocket {
+    socket: ReliableSocket<(), ClientMessage, ServerMessage, ConnectedSocket>,
+    //socket: ReliableSocket<(), ClientMessage, ServerMessage, CrapNetSocket>,
+    internal_state: InternalState,
+}
+
+impl ClientSocket {
+    pub fn new(addr: SocketAddr) -> io::Result<ClientSocket> {
+        Ok(ClientSocket {
+            socket: ReliableSocket::new(
+                ConnectedSocket::new(addr)?,
+                //CrapNetSocket::new(addr, 0.5, 0.3, 0.3, 0.5, 0.3, 0.3)?,
+                consts::ack_timeout_duration(),
+                consts::disconnect_force_timeout(),
+                false,
+            ),
+            internal_state: Connecting { resend_time: Instant::now() },
+        })
+    }
+
+    pub fn disconnect(&mut self) {
+        match self.internal_state {
+            Connecting { .. } => {
+                self.socket.send_to_conless((), ConnectionAbort);
+                self.internal_state = DisconnectedWithConAbort;
+            },
+            Connected { con_id } => {
+                self.socket.send_to_reliable(con_id, DisconnectRequest);
+                self.socket.disconnect(con_id);
+                self.internal_state = Disconnecting;
+            },
+            DisconnectedWithConAbort | Disconnecting | Disconnected => {
+                panic!("Wrong state for disconnecting!");
+            }
+        }
+    }
+
+    pub fn do_tick(&mut self) {
+        match self.internal_state {
+            Connecting { ref mut resend_time } => {
+                *resend_time = Instant::now() + consts::connection_request_resend_interval();
+                self.socket.send_to_conless((), ConnectionRequest);
+            },
+            Connected { .. } | Disconnecting => {
+                self.socket.do_tick();
+            },
+            DisconnectedWithConAbort | Disconnected => (),
+        }
+    }
+
+    pub fn next_tick_time(&self) -> Option<Instant> {
+        match self.internal_state {
+            Connecting { resend_time } => {
+                Some(resend_time)
+            },
+            Connected { .. } | Disconnecting => {
+                self.socket.next_tick_time()
+            },
+            DisconnectedWithConAbort | Disconnected => None,
+        }
+    }
+
+    pub fn send_input(&mut self, tick: u64, input: CharacterInput) {
+        if let Connected { con_id } = self.internal_state {
+            self.socket.send_to_unreliable(con_id, InputMessage { tick, input });
+        }
+    }
+
+    pub fn wait_event(&mut self, until: Instant) -> Option<ClientSocketEvent> {
+        if let DisconnectedWithConAbort = self.internal_state {
+            self.internal_state = Disconnected;
+            return Some(DoneDisconnecting);
+        }
+        loop {
+            match self.socket.wait_event(until) {
+                Some(ReliableSocketEvent::MessageReceived(msg)) => {
+                    match msg {
+                        CheckedMessage::Conless { clmsg, .. } => {
+                            match clmsg {
+                                ConnectionConfirm(player_id) => {
+                                    if let Connecting { .. } = self.internal_state {
+                                        let con_id = self.socket.connect(());
+                                        self.internal_state = Connected { con_id };
+                                        return Some(DoneConnecting { my_player_id: player_id })
+                                    }
+                                }
+                            }
+                        },
+                        CheckedMessage::Conful { con_id, cmsg } => {
+                            if let Connected { .. } = self.internal_state {
+                                match cmsg {
+                                    ConMessage::Reliable(rmsg) => match rmsg {
+                                        ConnectionClose => {
+                                            self.socket.terminate(con_id);
+                                            self.internal_state = Disconnected;
+                                            return Some(ConnectionClosed);
+                                        },
+                                    },
+                                    ConMessage::Unreliable(umsg) => match umsg {
+                                        TimeOutMessage => {
+                                            self.socket.terminate(con_id);
+                                            self.internal_state = Disconnected;
+                                            return Some(ConnectionEnd {
+                                                reason: ConnectionEndReason::TimedOut
+                                            });
+                                        },
+                                        SnapshotMessage(snapshot) => {
+                                            return Some(SnapshotReceived(snapshot))
+                                        },
+                                        InputAck { input_tick, arrival_tick_instant } => {
+                                            return Some(InputAckReceived {
+                                                input_tick,
+                                                arrival_tick_instant,
+                                            });
+                                        },
+                                    }
+                                }
+                            } else {
+                                panic!("Got connectionful message while not connected!");
+                            }
+                        }
+                    }
+                },
+                Some(ReliableSocketEvent::DoneDisconnecting(_)) =>{
+                    return Some(DoneDisconnecting);
+                },
+                Some(ReliableSocketEvent::ConnectionEnd { reason, .. }) => {
+                    return Some(ConnectionEnd { reason });
+                },
+                Some(ReliableSocketEvent::DisconnectingConnectionEnd { reason, .. }) => {
+                    return Some(DisconnectingConnectionEnd { reason });
+                },
+                Some(ReliableSocketEvent::NetworkError(e)) => return Some(NetworkError(e)),
+                None => return None,
+            }
+        }
+    }
+}
+
+struct ConnectedSocket {
+    socket: UdpSocket,
 }
 
 impl ConnectedSocket {

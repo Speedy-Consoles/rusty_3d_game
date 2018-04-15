@@ -7,12 +7,6 @@ use shared::tick_time::TickRate;
 use shared::model::Model;
 use shared::model::world::World;
 use shared::model::world::character::CharacterInput;
-use shared::net::socket::ConId;
-use shared::net::ReliableServerMessage;
-use shared::net::ReliableServerMessage::*;
-use shared::net::UnreliableServerMessage;
-use shared::net::UnreliableServerMessage::*;
-use shared::net::UnreliableClientMessage::*;
 use shared::net::Snapshot;
 use shared::consts;
 use shared::consts::TICK_SPEED;
@@ -23,7 +17,7 @@ use shared::consts::INPUT_ARRIVAL_SIGMA_FACTOR;
 use shared::util;
 use shared::online_distribution::OnlineDistribution;
 
-use server_interface::remote_server_interface::ClientSocket;
+use server_interface::remote_server_interface::socket::ClientSocket;
 use server_interface::ConnectionState;
 
 use self::InternalState::*;
@@ -53,7 +47,8 @@ struct AfterSnapshotData {
 }
 
 impl AfterSnapshotData {
-    fn new(snapshot: Snapshot, recv_time: Instant) -> AfterSnapshotData {
+    fn new(snapshot: Snapshot) -> AfterSnapshotData {
+        let recv_time = Instant::now();
         let start_tick_time = recv_time - snapshot.tick() / TICK_SPEED;
         let start_predicted_tick_time = start_tick_time - consts::initial_lag_assumption();
         AfterSnapshotData {
@@ -76,7 +71,8 @@ impl AfterSnapshotData {
         }
     }
 
-    pub fn on_snapshot(&mut self, snapshot: Snapshot, recv_time: Instant) {
+    pub fn on_snapshot(&mut self, snapshot: Snapshot) {
+        let recv_time = Instant::now();
         let start_tick_time = recv_time - snapshot.tick() / TICK_SPEED;
         if false {
             let sigma_dev = self.start_tick_time_distribution.sigma_dev(SNAPSHOT_ARRIVAL_SIGMA_FACTOR);
@@ -105,8 +101,7 @@ impl AfterSnapshotData {
         }
     }
 
-    fn on_input_ack(&mut self, input_tick: u64, arrival_tick_instant: TickInstant,
-                    recv_time: Instant) {
+    fn on_input_ack(&mut self, input_tick: u64, arrival_tick_instant: TickInstant) {
         if let Some(send_time) = self.sent_input_times.get(&input_tick) {
             let start_predicted_tick_time = *send_time
                 - (arrival_tick_instant - TickInstant::zero()) / TICK_SPEED;
@@ -114,7 +109,7 @@ impl AfterSnapshotData {
                 start_predicted_tick_time,
                 NEWEST_START_PREDICTED_TICK_TIME_WEIGHT,
             );
-            self.last_valid_input_ack_time = recv_time;
+            self.last_valid_input_ack_time = Instant::now();
         } else {
             println!("DEBUG: Received input ack of unknown input!");
         }
@@ -163,8 +158,7 @@ impl AfterSnapshotData {
         self.next_tick_time = self.tick_time + 1 / tick_rate;
     }
 
-    fn send_and_save_input(&mut self, character_input: CharacterInput, socket: &mut ClientSocket,
-                           con_id: ConId) {
+    fn send_and_save_input(&mut self, character_input: CharacterInput, socket: &mut ClientSocket) {
         self.predicted_tick += 1;
         let send_time = Instant::now();
         // we add a multiple of the standard deviation of the input arrival time distribution
@@ -197,12 +191,8 @@ impl AfterSnapshotData {
             }
         }
 
-        let msg = InputMessage {
-            tick: self.predicted_tick,
-            input: character_input,
-        };
         // TODO if we resend any input, the server will send another ack and we might calculate a wrong input delay
-        socket.send_to_unreliable(con_id, msg);
+        socket.send_input(self.predicted_tick, character_input);
         self.sent_input_times.insert(self.predicted_tick, send_time);
         self.sent_inputs.insert(self.predicted_tick, character_input);
     }
@@ -286,8 +276,8 @@ impl ConnectedState {
         }
     }
 
-    pub fn do_tick(&mut self, character_input: CharacterInput, socket: &mut ClientSocket,
-                   con_id: ConId) -> ConnectedStateTickResult {
+    pub fn do_tick(&mut self, character_input: CharacterInput, socket: &mut ClientSocket)
+    -> ConnectedStateTickResult {
         let now = Instant::now();
         match self.internal_state {
             BeforeSnapshot { init_time } => {
@@ -305,7 +295,7 @@ impl ConnectedState {
                     return ConnectedStateTickResult::InputAckTimeout;
                 }
                 data.update_tick();
-                data.send_and_save_input(character_input, socket, con_id);
+                data.send_and_save_input(character_input, socket);
                 data.remove_old_snapshots_and_inputs();
                 data.update_model( self.my_player_id);
                 ConnectedStateTickResult::Ok
@@ -336,27 +326,18 @@ impl ConnectedState {
         }
     }
 
-    pub fn handle_unreliable_message(&mut self, msg: UnreliableServerMessage) {
-        let recv_time = Instant::now();
-        match msg {
-            TimeOutMessage => (), // should be handled before
-            SnapshotMessage(snapshot) => match self.internal_state {
-                BeforeSnapshot { .. } => {
-                    self.internal_state = AfterSnapshot(AfterSnapshotData::new(snapshot, recv_time))
-                },
-                AfterSnapshot(ref mut data) => data.on_snapshot(snapshot, recv_time),
+    pub fn on_snapshot(&mut self, snapshot: Snapshot) {
+        match self.internal_state {
+            BeforeSnapshot { .. } => {
+                self.internal_state = AfterSnapshot(AfterSnapshotData::new(snapshot))
             },
-            InputAck { input_tick, arrival_tick_instant } => {
-                if let AfterSnapshot(ref mut data) = self.internal_state {
-                    data.on_input_ack(input_tick, arrival_tick_instant, recv_time);
-                }
-            }
+            AfterSnapshot(ref mut data) => data.on_snapshot(snapshot),
         }
     }
 
-    pub fn handle_reliable_message(&mut self, msg: ReliableServerMessage) {
-        match msg {
-            ConnectionClose => (), // should be handled before
+    pub fn on_input_ack(&mut self, input_tick: u64, arrival_tick_instant: TickInstant) {
+        if let AfterSnapshot(ref mut data) = self.internal_state {
+            data.on_input_ack(input_tick, arrival_tick_instant);
         }
     }
 }
