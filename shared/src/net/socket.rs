@@ -172,8 +172,7 @@ impl<AddrType: Copy> Connection<AddrType> {
         Ok(())
     }
 
-    fn send_unreliable<M, S, RecvType: Message>(&mut self, msg: M::Unreliable, socket: &mut S,
-                                                event_queue: &mut VecDeque<InternalEvent>)
+    fn send_unreliable<M, S>(&mut self, msg: M::Unreliable, socket: &mut S) -> io::Result<()>
     where
         M: Message,
         S: WrappedUdpSocket<AddrType>,
@@ -190,12 +189,11 @@ impl<AddrType: Copy> Connection<AddrType> {
         let header_size = header.pack(&mut buf).unwrap();
         let payload_size = msg.pack(&mut buf[header_size..]).unwrap();
         let msg_size = header_size + payload_size;
-        if let Err(e) = socket.send_to(&buf[..msg_size], self.addr) {
-            event_queue.push_back(NetworkError(e));
-        }
+        socket.send_to(&buf[..msg_size], self.addr)?;
+        Ok(())
     }
 
-    fn send_ack<S>(&mut self, socket: &mut S, event_queue: &mut VecDeque<InternalEvent>)
+    fn send_ack<S>(&mut self, socket: &mut S) -> io::Result<()>
     where
         S: WrappedUdpSocket<AddrType>,
     {
@@ -209,9 +207,8 @@ impl<AddrType: Copy> Connection<AddrType> {
         };
         self.my_resend = false;
         let header_size = header.pack(&mut buf).unwrap();
-        if let Err(e) = socket.send_to(&buf[..header_size], self.addr) {
-            event_queue.push_back(NetworkError(e));
-        }
+        socket.send_to(&buf[..header_size], self.addr)?;
+        Ok(())
     }
 }
 
@@ -312,7 +309,9 @@ impl<
         if let Some(mut con) = self.connections.remove(&con_id) {
             self.con_ids_by_addr.remove(&con.addr).unwrap();
             if !con.timed_out {
-                con.send_ack(&mut self.socket, &mut self.event_queue);
+                if let Err(e) = con.send_ack(&mut self.socket) {
+                    self.event_queue.push_back(NetworkError(e));
+                }
             }
         } else {
             println!("DEBUG: Tried to disconnect non-existing connection");
@@ -440,11 +439,12 @@ impl<
                 return;
             }
 
-            con.send_unreliable::<SendType, WrappedUdpSocketType, RecvType>(
+            if let Err(e) = con.send_unreliable::<SendType, WrappedUdpSocketType>(
                 msg,
                 &mut self.socket,
-                &mut self.event_queue,
-            );
+            ) {
+                self.event_queue.push_back(NetworkError(e));
+            }
         } else {
             println!("DEBUG: Tried to send unreliable message without connection!");
         }
@@ -475,11 +475,12 @@ impl<
         // TODO pack here
         for (_, con) in self.connections.iter_mut() {
             if !con.disconnecting && !con.timed_out {
-                con.send_unreliable::<SendType, WrappedUdpSocketType, RecvType>(
+                if let Err(e) = con.send_unreliable::<SendType, WrappedUdpSocketType>(
                     msg.clone(),
                     &mut self.socket,
-                    &mut self.event_queue,
-                );
+                ) {
+                    self.event_queue.push_back(NetworkError(e));
+                }
             }
         }
     }
