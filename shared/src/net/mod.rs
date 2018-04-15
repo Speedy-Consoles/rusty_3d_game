@@ -159,7 +159,7 @@ pub enum UnreliableClientMessage {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ConlessServerMessage {
-    ConnectionConfirm(u64),
+    ConnectionAccept(u64),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

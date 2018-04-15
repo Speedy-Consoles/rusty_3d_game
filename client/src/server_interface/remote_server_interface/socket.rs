@@ -39,6 +39,8 @@ use shared::model::world::character::CharacterInput;
 use self::ClientSocketEvent::*;
 use self::InternalState::*;
 
+// TODO what if server and client simultaneously disconnect?
+
 pub enum ClientSocketEvent {
     DoneConnecting {
         my_player_id: u64,
@@ -152,11 +154,15 @@ impl ClientSocket {
                     match msg {
                         CheckedMessage::Conless { clmsg, .. } => {
                             match clmsg {
-                                ConnectionConfirm(player_id) => {
+                                ConnectionAccept(player_id) => {
                                     if let Connecting { .. } = self.internal_state {
                                         let con_id = self.socket.connect(());
                                         self.internal_state = Connected { con_id };
                                         return Some(DoneConnecting { my_player_id: player_id })
+                                    } else {
+                                        println!(
+                                            "DEBUG: Received connection accept while connected!"
+                                        );
                                     }
                                 }
                             }
@@ -191,21 +197,39 @@ impl ClientSocket {
                                     }
                                 }
                             } else {
-                                panic!("Got connectionful message while not connected!");
+                                panic!("Received connectionful message while not connected!");
                             }
                         }
                     }
                 },
-                Some(Event::DoneDisconnecting(_)) =>{
-                    return Some(DoneDisconnecting);
+                Some(Event::DoneDisconnecting(_)) => {
+                    if let Disconnecting = self.internal_state {
+                        self.internal_state = Disconnected;
+                        return Some(DoneDisconnecting);
+                    } else {
+                        panic!("Received DoneDisconnecting while not disconnecting!");
+                    }
                 },
                 Some(Event::ConnectionEnd { reason, .. }) => {
-                    return Some(ConnectionEnd { reason });
+                    if let Connected { .. } = self.internal_state {
+                        self.internal_state = Disconnected;
+                        return Some(ConnectionEnd { reason });
+                    } else {
+                        panic!("Received ConnectionEnd while not connected!");
+                    }
                 },
                 Some(Event::DisconnectingConnectionEnd { reason, .. }) => {
-                    return Some(DisconnectingConnectionEnd { reason });
+                    if let Disconnecting = self.internal_state {
+                        self.internal_state = Disconnected;
+                        return Some(DisconnectingConnectionEnd { reason });
+                    } else {
+                        panic!("Received DisconnectingConnectionEnd while not disconnecting!");
+                    }
                 },
-                Some(Event::NetworkError(e)) => return Some(NetworkError(e)),
+                Some(Event::NetworkError(e)) => {
+                    self.internal_state = Disconnected;
+                    return Some(NetworkError(e));
+                },
                 None => return None,
             }
         }

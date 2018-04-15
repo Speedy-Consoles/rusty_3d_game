@@ -29,10 +29,17 @@ enum InternalDisconnectedReason {
     TimedOut,
 }
 
+#[derive(Clone, Copy)]
+enum DisconnectingReason {
+    UserDisconnect,
+    SnapshotTimeout,
+    InputAckTimeout,
+}
+
 enum InternalState {
     Connecting,
     Connected(ConnectedState),
-    Disconnecting,
+    Disconnecting(DisconnectingReason),
     Disconnected(InternalDisconnectedReason),
 }
 
@@ -52,20 +59,23 @@ impl RemoteServerInterface {
 
 impl ServerInterface for RemoteServerInterface {
     fn do_tick(&mut self, character_input: CharacterInput) {
-        let mut timed_out = false;
-        match self.internal_state {
+        let disconnecting_reason = match self.internal_state {
             Connected(ref mut con_state) => {
                 match con_state.do_tick(character_input, &mut self.socket) {
-                    ConnectedStateTickResult::Ok => (),
-                    ConnectedStateTickResult::SnapshotTimeout
-                    | ConnectedStateTickResult::InputAckTimeout => timed_out = true,
+                    ConnectedStateTickResult::Ok => None,
+                    ConnectedStateTickResult::SnapshotTimeout => {
+                        Some(DisconnectingReason::SnapshotTimeout)
+                    },
+                    ConnectedStateTickResult::InputAckTimeout => {
+                        Some(DisconnectingReason::InputAckTimeout)
+                    },
                 }
             },
-            Connecting | Disconnecting | Disconnected(_) => (),
+            Connecting | Disconnecting(_) | Disconnected(_) => None,
         };
-        if timed_out {
-            // TODO disconnect?
-            self.internal_state = Disconnected(TimedOut);
+        if let Some(reason) = disconnecting_reason {
+            self.socket.disconnect();
+            self.internal_state = Disconnecting(reason);
         }
     }
 
@@ -115,9 +125,21 @@ impl ServerInterface for RemoteServerInterface {
                 HandleTrafficResult::Interrupt
             }
             Some(ClientSocketEvent::DoneDisconnecting) => {
-                if let Disconnecting = self.internal_state {
-                    println!("DEBUG: Disconnected gracefully!");
-                    self.internal_state = Disconnected(UserDisconnect);
+                if let Disconnecting(reason) = self.internal_state {
+                    match reason {
+                        DisconnectingReason::UserDisconnect => {
+                            println!("DEBUG: Disconnected gracefully!");
+                            self.internal_state = Disconnected(UserDisconnect);
+                        },
+                        DisconnectingReason::SnapshotTimeout => {
+                            println!("DEBUG: Timed out!");
+                            self.internal_state = Disconnected(TimedOut);
+                        },
+                        DisconnectingReason::InputAckTimeout => {
+                            println!("DEBUG: Timed out!");
+                            self.internal_state = Disconnected(TimedOut);
+                        },
+                    }
                 } else {
                     panic!("Got DoneDisconnecting event while not disconnecting!");
                 }
@@ -141,17 +163,27 @@ impl ServerInterface for RemoteServerInterface {
                 HandleTrafficResult::Interrupt
             },
             Some(ClientSocketEvent::DisconnectingConnectionEnd { reason, .. }) => {
-                if let Disconnecting = self.internal_state {
-                    match reason {
-                        ConnectionEndReason::TimedOut => {
-                            println!("DEBUG: Timed out during disconnect!");
+                if let Disconnecting(internal_reason) = self.internal_state {
+                    // TODO inform about unsent messages
+                    match internal_reason {
+                        DisconnectingReason::UserDisconnect => {
+                            match reason {
+                                ConnectionEndReason::TimedOut => {
+                                    println!("DEBUG: Timed out during disconnect!");
+                                },
+                                ConnectionEndReason::Reset => {
+                                    println!("DEBUG: Connection reset during disconnect!");
+                                },
+                            }
+                            self.internal_state = Disconnected(UserDisconnect);
                         },
-                        ConnectionEndReason::Reset => {
-                            println!("DEBUG: Connection reset during disconnect!");
+                        DisconnectingReason::SnapshotTimeout => {
+                            self.internal_state = Disconnected(TimedOut);
+                        },
+                        DisconnectingReason::InputAckTimeout => {
+                            self.internal_state = Disconnected(TimedOut);
                         },
                     }
-                    // TODO inform about unsent messages
-                    self.internal_state = Disconnected(UserDisconnect);
                 } else {
                     panic!("Got DisconnectingConnectionEnd event while not disconnecting!");
                 }
@@ -174,7 +206,7 @@ impl ServerInterface for RemoteServerInterface {
         match self.internal_state {
             Connecting { .. } => ConnectionState::Connecting,
             Connected(ref con_state) => con_state.connection_state(),
-            Disconnecting => ConnectionState::Disconnecting,
+            Disconnecting(_) => ConnectionState::Disconnecting,
             Disconnected(ref reason) => ConnectionState::Disconnected(match reason {
                 &UserDisconnect => DisconnectedReason::UserDisconnect,
                 &Kicked { ref kick_message } => DisconnectedReason::Kicked { kick_message },
@@ -187,17 +219,17 @@ impl ServerInterface for RemoteServerInterface {
     fn next_game_tick_time(&self) -> Option<Instant> {
         match self.internal_state {
             Connected(ref con_state) => con_state.next_tick_time(),
-            Connecting | Disconnecting | Disconnected(_) => None,
+            Connecting | Disconnecting(_) | Disconnected(_) => None,
         }
     }
 
     fn disconnect(&mut self) {
         match self.internal_state {
             Connecting | Connected(_) => {
-                self.internal_state = Disconnecting;
+                self.internal_state = Disconnecting(DisconnectingReason::UserDisconnect);
                 self.socket.disconnect();
             },
-            Disconnecting | Disconnected(_) => (),
+            Disconnecting(_) | Disconnected(_) => (),
         }
     }
 

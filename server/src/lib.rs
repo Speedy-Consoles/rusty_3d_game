@@ -229,7 +229,7 @@ impl Server {
                                 player_id
                             },
                         };
-                        self.socket.send_to_conless(addr, ConnectionConfirm(player_id));
+                        self.socket.send_to_conless(addr, ConnectionAccept(player_id));
                     },
                     ConnectionAbort => {
                         if let Some(con_id) = con_id {
