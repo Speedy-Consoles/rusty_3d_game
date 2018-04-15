@@ -19,7 +19,7 @@ use shared::model::Model;
 use shared::model::world::character::CharacterInput;
 use shared::tick_time::TickInstant;
 use shared::net::socket::ConnectionEndReason;
-use shared::net::socket::ReliableSocketEvent;
+use shared::net::socket::Event;
 use shared::net::socket::ConId;
 use shared::net::socket::CheckedMessage;
 use shared::net::socket::ConMessage;
@@ -153,11 +153,11 @@ impl Server {
                 _ => (),
             }
             match self.socket.wait_event(next_loop_time) {
-                Some(ReliableSocketEvent::MessageReceived(msg)) => self.handle_message(msg),
-                Some(ReliableSocketEvent::DoneDisconnecting(con_id)) => {
+                Some(Event::MessageReceived(msg)) => self.handle_message(msg),
+                Some(Event::DoneDisconnecting(con_id)) => {
                     println!("DEBUG: {} disconnected gracefully!", con_id);
                 }
-                Some(ReliableSocketEvent::ConnectionEnd { reason, con_id }) => {
+                Some(Event::ConnectionEnd { reason, con_id }) => {
                     match reason {
                         ConnectionEndReason::TimedOut => {
                             println!("DEBUG: {} timed out!", con_id);
@@ -168,7 +168,7 @@ impl Server {
                     }
                     self.remove_client(con_id)
                 },
-                Some(ReliableSocketEvent::DisconnectingConnectionEnd { reason, con_id }) => {
+                Some(Event::DisconnectingConnectionEnd { reason, con_id }) => {
                     match reason {
                         ConnectionEndReason::TimedOut => {
                             println!("DEBUG: {} timed out during disconnect!", con_id);
@@ -178,7 +178,7 @@ impl Server {
                         },
                     }
                 },
-                Some(ReliableSocketEvent::NetworkError(e)) => {
+                Some(Event::NetworkError(e)) => {
                     println!("ERROR: Network broken: {:?}", e);
                     self.closing = true;
                     let now = Instant::now();

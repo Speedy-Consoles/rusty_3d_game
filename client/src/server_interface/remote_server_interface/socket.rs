@@ -23,7 +23,7 @@ use shared::net::MAX_MESSAGE_LENGTH;
 use shared::net::socket::ConId;
 use shared::net::socket::WrappedUdpSocket;
 use shared::net::socket::ReliableSocket;
-use shared::net::socket::ReliableSocketEvent;
+use shared::net::socket::Event;
 use shared::net::socket::CheckedMessage;
 use shared::net::socket::ConMessage;
 use shared::net::ClientMessage;
@@ -148,7 +148,7 @@ impl ClientSocket {
         }
         loop {
             match self.socket.wait_event(until) {
-                Some(ReliableSocketEvent::MessageReceived(msg)) => {
+                Some(Event::MessageReceived(msg)) => {
                     match msg {
                         CheckedMessage::Conless { clmsg, .. } => {
                             match clmsg {
@@ -196,16 +196,16 @@ impl ClientSocket {
                         }
                     }
                 },
-                Some(ReliableSocketEvent::DoneDisconnecting(_)) =>{
+                Some(Event::DoneDisconnecting(_)) =>{
                     return Some(DoneDisconnecting);
                 },
-                Some(ReliableSocketEvent::ConnectionEnd { reason, .. }) => {
+                Some(Event::ConnectionEnd { reason, .. }) => {
                     return Some(ConnectionEnd { reason });
                 },
-                Some(ReliableSocketEvent::DisconnectingConnectionEnd { reason, .. }) => {
+                Some(Event::DisconnectingConnectionEnd { reason, .. }) => {
                     return Some(DisconnectingConnectionEnd { reason });
                 },
-                Some(ReliableSocketEvent::NetworkError(e)) => return Some(NetworkError(e)),
+                Some(Event::NetworkError(e)) => return Some(NetworkError(e)),
                 None => return None,
             }
         }

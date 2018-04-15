@@ -18,7 +18,7 @@ use consts::MAX_UNACKED_MESSAGES;
 use consts::ACK_DURATION_SIGMA_FACTOR;
 use online_distribution::OnlineDistribution;
 
-use self::ReliableSocketEvent::*;
+use self::InternalEvent::*;
 use self::CheckedMessage::*;
 use self::ConMessage::*;
 use self::ConnectionEndReason::*;
@@ -35,7 +35,7 @@ pub enum ConnectionEndReason {
     Reset,
 }
 
-pub enum ReliableSocketEvent<AddrType, RecvType: Message> {
+pub enum Event<AddrType, RecvType: Message> {
     MessageReceived(CheckedMessage<AddrType, RecvType>),
     DoneDisconnecting(u64),
     DisconnectingConnectionEnd {
@@ -71,6 +71,14 @@ pub enum ConMessage<T: Message> {
 
 pub type ConId = u64;
 
+enum InternalEvent {
+    ConnectionEnd {
+        con_id: u64,
+        reason: ConnectionEndReason,
+    },
+    NetworkError(io::Error),
+}
+
 enum SendReliableError {
     BufferFull,
     NetworkError(io::Error)
@@ -100,10 +108,13 @@ struct Connection<AddrType: Copy> {
     last_recv_time: Instant,
     last_resend_time: Option<Instant>,
     disconnecting: bool,
+    timed_out: bool,
 }
 
 impl<AddrType: Copy> Connection<AddrType> {
     fn on_ack(&mut self, their_ack: u64, their_resend: bool) {
+        debug_assert!(!self.timed_out);
+
         self.last_recv_time = Instant::now();
         self.their_ack = their_ack;
         self.their_resend = their_resend;
@@ -128,6 +139,8 @@ impl<AddrType: Copy> Connection<AddrType> {
         M: Message,
         S: WrappedUdpSocket<AddrType>,
     {
+        debug_assert!(!self.timed_out);
+
         if self.sent_messages.len() >= MAX_UNACKED_MESSAGES {
             println!("DEBUG: Maximum number of unacked messages reached!");
             return Err(SendReliableError::BufferFull);
@@ -160,11 +173,13 @@ impl<AddrType: Copy> Connection<AddrType> {
     }
 
     fn send_unreliable<M, S, RecvType: Message>(&mut self, msg: M::Unreliable, socket: &mut S,
-        event_queue: &mut VecDeque<ReliableSocketEvent<AddrType, RecvType>>)
+                                                event_queue: &mut VecDeque<InternalEvent>)
     where
         M: Message,
         S: WrappedUdpSocket<AddrType>,
     {
+        debug_assert!(!self.timed_out);
+
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let header = MessageHeader::Conful {
             ack: self.my_ack,
@@ -176,15 +191,16 @@ impl<AddrType: Copy> Connection<AddrType> {
         let payload_size = msg.pack(&mut buf[header_size..]).unwrap();
         let msg_size = header_size + payload_size;
         if let Err(e) = socket.send_to(&buf[..msg_size], self.addr) {
-            event_queue.push_back(ReliableSocketEvent::NetworkError(e));
+            event_queue.push_back(NetworkError(e));
         }
     }
 
-    fn send_ack<S, RecvType: Message>(&mut self, socket: &mut S,
-        event_queue: &mut VecDeque<ReliableSocketEvent<AddrType, RecvType>>)
+    fn send_ack<S>(&mut self, socket: &mut S, event_queue: &mut VecDeque<InternalEvent>)
     where
         S: WrappedUdpSocket<AddrType>,
     {
+        debug_assert!(!self.timed_out);
+
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         let header = MessageHeader::Conful {
             ack: self.my_ack,
@@ -194,7 +210,7 @@ impl<AddrType: Copy> Connection<AddrType> {
         self.my_resend = false;
         let header_size = header.pack(&mut buf).unwrap();
         if let Err(e) = socket.send_to(&buf[..header_size], self.addr) {
-            event_queue.push_back(ReliableSocketEvent::NetworkError(e));
+            event_queue.push_back(NetworkError(e));
         }
     }
 }
@@ -226,14 +242,14 @@ pub struct ReliableSocket<
     next_connection_id: ConId,
     send_con_reset: bool,
     connections: HashMap<ConId, Connection<AddrType>>, // TODO consider making this an array
-    remove_connections_buffer: Vec<ConId>,
     con_ids_by_addr: HashMap<AddrType, ConId>, // TODO consider replacing this by linear search
     socket: WrappedUdpSocketType,
     next_tick_time: Instant,
     timeout_duration: Duration,
     timeout_duration_disconnecting: Duration,
-    event_queue: VecDeque<ReliableSocketEvent<AddrType, RecvType>>,
+    event_queue: VecDeque<InternalEvent>,
     phantom_send: PhantomData<SendType>,
+    phantom_recv: PhantomData<RecvType>,
 }
 
 impl<
@@ -248,7 +264,6 @@ impl<
             next_connection_id: 0,
             send_con_reset,
             connections: HashMap::new(),
-            remove_connections_buffer: Vec::new(),
             con_ids_by_addr: HashMap::new(),
             socket: wrapped_udp_socket,
             next_tick_time: Instant::now(),
@@ -256,6 +271,7 @@ impl<
             timeout_duration_disconnecting: ack_timeout_disconnecting,
             event_queue: VecDeque::new(),
             phantom_send: PhantomData,
+            phantom_recv: PhantomData,
         }
     }
 
@@ -278,6 +294,7 @@ impl<
             last_recv_time: Instant::now(),
             last_resend_time: None,
             disconnecting: false,
+            timed_out: false,
         });
         self.con_ids_by_addr.insert(addr, id);
         id
@@ -294,7 +311,9 @@ impl<
     pub fn terminate(&mut self, con_id: ConId) {
         if let Some(mut con) = self.connections.remove(&con_id) {
             self.con_ids_by_addr.remove(&con.addr).unwrap();
-            con.send_ack(&mut self.socket, &mut self.event_queue);
+            if !con.timed_out {
+                con.send_ack(&mut self.socket, &mut self.event_queue);
+            }
         } else {
             println!("DEBUG: Tried to disconnect non-existing connection");
         }
@@ -303,6 +322,10 @@ impl<
     pub fn do_tick(&mut self) {
         let now = Instant::now();
         for (&con_id, con) in self.connections.iter_mut() {
+            if con.timed_out {
+                continue;
+            }
+
             // check if didn't hear anything for too long
             if let Some(&SentMessage { send_time, .. }) = con.sent_messages.front() {
                 let ack_silence = now - send_time;
@@ -312,7 +335,7 @@ impl<
                     ack_silence > self.timeout_duration
                 };
                 if timed_out {
-                    self.remove_connections_buffer.push(con_id);
+                    con.timed_out = true;
                     continue;
                 }
             }
@@ -355,23 +378,6 @@ impl<
             }
         }
 
-        for con_id in self.remove_connections_buffer.drain(..) {
-            // TODO add info about unsent messages
-            let con = self.connections.remove(&con_id).unwrap();
-            self.con_ids_by_addr.remove(&con.addr).unwrap();
-            if con.disconnecting {
-                self.event_queue.push_back(ReliableSocketEvent::DisconnectingConnectionEnd {
-                    reason: TimedOut,
-                    con_id,
-                });
-            } else {
-                self.event_queue.push_back(ReliableSocketEvent::ConnectionEnd {
-                    reason: TimedOut,
-                    con_id,
-                });
-            }
-        }
-
         // TODO make flexible
         self.next_tick_time = now + Duration::new(0, 8333333);
     }
@@ -397,10 +403,13 @@ impl<
     }
 
     pub fn send_to_reliable(&mut self, con_id: ConId, msg: SendType::Reliable) {
-        let mut buffer_full = false;
         if let Some(con) = self.connections.get_mut(&con_id) {
             if con.disconnecting {
                 println!("DEBUG: Tried to send message with disconnecting connection!");
+                return;
+            }
+            if con.timed_out {
+                println!("DEBUG: Tried to send message with timed-out connection!");
                 return;
             }
 
@@ -409,20 +418,14 @@ impl<
                 &mut self.socket,
             ) {
                 Ok(_) => (),
-                Err(SendReliableError::BufferFull) => buffer_full = true,
+                Err(SendReliableError::BufferFull) => {
+                    con.timed_out = true;
+                    self.event_queue.push_back(ConnectionEnd { con_id, reason: TimedOut })
+                },
                 Err(SendReliableError::NetworkError(e)) => self.event_queue.push_back(NetworkError(e)),
             }
         } else {
             println!("DEBUG: Tried to send reliable message without connection!");
-        }
-
-        if buffer_full {
-            let con = self.connections.remove(&con_id).unwrap();
-            self.con_ids_by_addr.remove(&con.addr).unwrap();
-            self.event_queue.push_back(ReliableSocketEvent::ConnectionEnd {
-                reason: TimedOut,
-                con_id,
-            });
         }
     }
 
@@ -430,6 +433,10 @@ impl<
         if let Some(con) = self.connections.get_mut(&con_id) {
             if con.disconnecting {
                 println!("DEBUG: Tried to send message with disconnecting connection!");
+                return;
+            }
+            if con.timed_out {
+                println!("DEBUG: Tried to send message with timed-out connection!");
                 return;
             }
 
@@ -446,14 +453,15 @@ impl<
     pub fn broadcast_reliable(&mut self, msg: SendType::Reliable) {
         // TODO pack here
         for (&con_id, con) in self.connections.iter_mut() {
-            if !con.disconnecting {
+            if !con.disconnecting && !con.timed_out {
                 match con.send_reliable::<SendType, WrappedUdpSocketType, RecvType>(
                     msg.clone(),
                     &mut self.socket,
                 ) {
                     Ok(_) => (),
                     Err(SendReliableError::BufferFull) => {
-                        self.remove_connections_buffer.push(con_id)
+                        con.timed_out = true;
+                        self.event_queue.push_back(ConnectionEnd { con_id, reason: TimedOut });
                     },
                     Err(SendReliableError::NetworkError(e)) => {
                         self.event_queue.push_back(NetworkError(e))
@@ -461,21 +469,12 @@ impl<
                 }
             }
         }
-
-        for &con_id in self.remove_connections_buffer.iter() {
-            let con = self.connections.remove(&con_id).unwrap();
-            self.con_ids_by_addr.remove(&con.addr).unwrap();
-            self.event_queue.push_back(ReliableSocketEvent::ConnectionEnd {
-                reason: TimedOut,
-                con_id
-            });
-        }
     }
 
     pub fn broadcast_unreliable(&mut self, msg: SendType::Unreliable) {
         // TODO pack here
         for (_, con) in self.connections.iter_mut() {
-            if !con.disconnecting {
+            if !con.disconnecting && !con.timed_out {
                 con.send_unreliable::<SendType, WrappedUdpSocketType, RecvType>(
                     msg.clone(),
                     &mut self.socket,
@@ -486,10 +485,23 @@ impl<
     }
 
     // TODO maybe this wrapper method is not needed and we just return if the time is up
-    pub fn wait_event(&mut self, until: Instant) -> Option<ReliableSocketEvent<AddrType, RecvType>> {
+    pub fn wait_event(&mut self, until: Instant) -> Option<Event<AddrType, RecvType>> {
         // first return any queued event
-        if let Some(event) = self.event_queue.pop_front() {
-            return Some(event);
+        if let Some(e) = self.event_queue.pop_front() {
+            match e {
+                ConnectionEnd { con_id, reason } => {
+                    // connection might have been removed via terminate() in the mean time
+                    if let Some(con) = self.connections.remove(&con_id) {
+                        self.con_ids_by_addr.remove(&con.addr).unwrap();
+                        if con.disconnecting {
+                            return Some(Event::DisconnectingConnectionEnd { con_id, reason })
+                        } else {
+                            return Some(Event::ConnectionEnd { con_id, reason })
+                        }
+                    }
+                },
+                NetworkError(e) => return Some(Event::NetworkError(e)),
+            }
         }
 
         // then make sure we read a message if there are any
@@ -506,7 +518,7 @@ impl<
 
     // reads messages until there is a valid one or an error occurs
     // time out errors are transformed into None
-    fn recv_from<'a>(&mut self, until: Option<Instant>) -> Option<ReliableSocketEvent<AddrType, RecvType>> {
+    fn recv_from<'a>(&mut self, until: Option<Instant>) -> Option<Event<AddrType, RecvType>> {
         let mut buf = [0; MAX_MESSAGE_LENGTH];
         loop {
             if let Some(until) = until {
@@ -526,7 +538,7 @@ impl<
                                 MessageHeader::Conless => {
                                     let con_id = self.con_ids_by_addr.get(&addr).map(|id| *id);
                                     match RecvType::Conless::unpack(payload_slice) {
-                                        Ok(clmsg) => return Some(MessageReceived(Conless {
+                                        Ok(clmsg) => return Some(Event::MessageReceived(Conless {
                                             addr,
                                             con_id,
                                             clmsg,
@@ -563,7 +575,7 @@ impl<
                                                 &buf[..header_size],
                                                 addr
                                             ) {
-                                                return Some(NetworkError(err));
+                                                return Some(Event::NetworkError(err));
                                             }
                                         }
                                     }
@@ -572,12 +584,12 @@ impl<
                                     if let Some(con_id) = self.con_ids_by_addr.remove(&addr) {
                                         let con = self.connections.remove(&con_id).unwrap();
                                         if con.disconnecting {
-                                            return Some(DisconnectingConnectionEnd {
+                                            return Some(Event::DisconnectingConnectionEnd {
                                                 reason: Reset,
                                                 con_id,
                                             });
                                         } else {
-                                            return Some(ConnectionEnd {
+                                            return Some(Event::ConnectionEnd {
                                                 reason: Reset,
                                                 con_id,
                                             });
@@ -595,7 +607,7 @@ impl<
                 Err(e) => {
                     match e.kind() {
                         ErrorKind::WouldBlock | ErrorKind::TimedOut => return None,
-                        _ => return Some(NetworkError(e)),
+                        _ => return Some(Event::NetworkError(e)),
                     };
                 }
             }
@@ -609,7 +621,7 @@ impl<
         their_resend: bool,
         header: ConfulHeader,
         payload_slice: &[u8]
-    ) -> Option<ReliableSocketEvent<AddrType, RecvType>> {
+    ) -> Option<Event<AddrType, RecvType>> {
         {
             let con = self.connections.get_mut(&con_id).unwrap();
             con.on_ack(their_ack, their_resend);
@@ -638,7 +650,7 @@ impl<
                                 Ok(rmsg) => {
                                     con.my_ack += 1;
                                     println!("DEBUG: Received reliable message!");
-                                    return Some(MessageReceived(Conful {
+                                    return Some(Event::MessageReceived(Conful {
                                         con_id,
                                         cmsg: Reliable::<RecvType>(rmsg),
                                     }));
@@ -658,7 +670,7 @@ impl<
                     ConfulHeader::Unreliable => {
                         match RecvType::Unreliable::unpack(payload_slice) {
                             Ok(umsg) => {
-                                return Some(MessageReceived(
+                                return Some(Event::MessageReceived(
                                     Conful::<AddrType, RecvType> {
                                         con_id,
                                         cmsg: Unreliable::<RecvType>(umsg),
@@ -678,6 +690,6 @@ impl<
 
         let con = self.connections.remove(&con_id).unwrap();
         self.con_ids_by_addr.remove(&con.addr).unwrap();
-        Some(DoneDisconnecting(con_id))
+        Some(Event::DoneDisconnecting(con_id))
     }
 }

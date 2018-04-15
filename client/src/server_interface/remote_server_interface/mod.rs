@@ -64,6 +64,7 @@ impl ServerInterface for RemoteServerInterface {
             Connecting | Disconnecting | Disconnected(_) => (),
         };
         if timed_out {
+            // TODO disconnect?
             self.internal_state = Disconnected(TimedOut);
         }
     }
